@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $DesktopProject = Join-Path $Root "src\LightControls.Desktop\LightControls.Desktop.csproj"
 . (Join-Path $PSScriptRoot "Get-AppExe.ps1")
+. (Join-Path $PSScriptRoot "Stop-AppInstances.ps1")
 
 $exe = Get-AppExe -Root $Root
 if (-not $exe) {
@@ -19,12 +20,12 @@ if (-not $exe) {
     }
 }
 
-$running = Get-Process -Name "LightControls.Desktop" -ErrorAction SilentlyContinue
-if ($running) {
-    Write-Host "Light Controls is already running. Close it and run this again to pick up the latest build."
-    exit 0
+$resolvedExe = (Resolve-Path $exe).Path
+if (Test-LocalLightControlsBuildPath -ExecutablePath $resolvedExe -Root $Root) {
+    Stop-LightControlsApp -LocalBuildsOnly -Root $Root
+} else {
+    Stop-LightControlsApp -ExecutablePath $resolvedExe
 }
 
-$resolvedExe = (Resolve-Path $exe).Path
 Start-Process -FilePath $resolvedExe -WorkingDirectory (Split-Path $resolvedExe -Parent)
 Write-Host "Started Light Controls from $resolvedExe"
