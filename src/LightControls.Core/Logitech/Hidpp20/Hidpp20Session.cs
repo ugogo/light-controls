@@ -11,6 +11,7 @@ internal sealed class Hidpp20Session : IDisposable
     private readonly HidDevice _longDevice;
     private readonly HidStream _shortStream;
     private readonly HidStream _longStream;
+    private readonly object _ioLock = new();
     private byte _deviceIndex;
     private readonly Dictionary<ushort, byte> _featureIndexCache = [];
 
@@ -120,6 +121,70 @@ internal sealed class Hidpp20Session : IDisposable
         return false;
     }
 
+    public bool TryMaintainPowerLedColor(byte red, byte green, byte blue)
+    {
+        if (!TryGetFeatureIndex(Hidpp20Constants.FeatureRgbEffects, out var featureIndex))
+        {
+            return TrySetPowerLedColor(red, green, blue, out _);
+        }
+
+        TryEnsureSoftwareControl();
+        TryEnableRgbSoftwareControl(featureIndex);
+        TryDisableRgbPowerSave(featureIndex);
+        return TrySetRgbEffectsColor(featureIndex, red, green, blue, out _);
+    }
+
+    public void TryReleaseRgbSoftwareControl()
+    {
+        if (!TryGetFeatureIndex(Hidpp20Constants.FeatureRgbEffects, out var featureIndex))
+        {
+            return;
+        }
+
+        var report = CreateLongReport(Hidpp20Constants.CmdRgbEffectsManageSwControl);
+        report[2] = featureIndex;
+        report[4] = Hidpp20Constants.RgbSwControlCluster;
+        report[5] = Hidpp20Constants.RgbSwControlReleaseFlags;
+        report[6] = Hidpp20Constants.RgbSwControlReleaseFlags;
+        TryRequest(report, out _);
+    }
+
+    public bool TryWaitForNotification(int timeoutMs, out byte[] report)
+    {
+        report = new byte[LongReportLength];
+
+        lock (_ioLock)
+        {
+            foreach (var readStream in new[] { _longStream, _shortStream })
+            {
+                var readLength = readStream == _shortStream ? ShortReportLength : LongReportLength;
+                var readBuffer = new byte[readLength];
+
+                try
+                {
+                    readStream.ReadTimeout = Math.Max(1, timeoutMs);
+                    var read = readStream.Read(readBuffer, 0, readBuffer.Length);
+                    if (read <= 0)
+                    {
+                        continue;
+                    }
+
+                    Array.Copy(readBuffer, report, Math.Min(readBuffer.Length, report.Length));
+                    if (IsAsyncNotification(readBuffer))
+                    {
+                        return true;
+                    }
+                }
+                catch (TimeoutException)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private bool TrySetViaRgbEffects(byte red, byte green, byte blue, out string? error)
     {
         error = null;
@@ -130,7 +195,13 @@ internal sealed class Hidpp20Session : IDisposable
         }
 
         TryEnableRgbSoftwareControl(featureIndex);
+        TryDisableRgbPowerSave(featureIndex);
+        return TrySetRgbEffectsColor(featureIndex, red, green, blue, out error);
+    }
 
+    private bool TrySetRgbEffectsColor(byte featureIndex, byte red, byte green, byte blue, out string? error)
+    {
+        error = null;
         const byte clusterIndex = 0;
         var effectIndex = TryFindSolidColorEffectIndex(featureIndex, clusterIndex) ?? 0;
 
@@ -156,9 +227,21 @@ internal sealed class Hidpp20Session : IDisposable
     {
         var report = CreateLongReport(Hidpp20Constants.CmdRgbEffectsManageSwControl);
         report[2] = featureIndex;
+        report[4] = Hidpp20Constants.RgbSwControlCluster;
+        report[5] = Hidpp20Constants.RgbSwControlMode;
+        report[6] = Hidpp20Constants.RgbSwControlActiveFlags;
+        TryRequest(report, out _);
+    }
+
+    private void TryDisableRgbPowerSave(byte featureIndex)
+    {
+        var report = CreateLongReport(Hidpp20Constants.CmdRgbEffectsSetPowerSave);
+        report[2] = featureIndex;
         report[4] = 0x01;
-        report[5] = 0x03;
-        report[6] = 0x05;
+        report[8] = 0xFF;
+        report[9] = 0xFF;
+        report[10] = 0xFF;
+        report[11] = 0xFF;
         TryRequest(report, out _);
     }
 
@@ -346,40 +429,64 @@ internal sealed class Hidpp20Session : IDisposable
     {
         response = new byte[LongReportLength];
 
-        var isShort = request[0] == Hidpp20Constants.ReportIdShort;
-        var writeStream = isShort ? _shortStream : _longStream;
-        writeStream.Write(PadReport(request));
-
-        foreach (var readStream in new[] { _longStream, _shortStream })
+        lock (_ioLock)
         {
-            var readLength = readStream == _shortStream ? ShortReportLength : LongReportLength;
-            var readBuffer = new byte[readLength];
+            var isShort = request[0] == Hidpp20Constants.ReportIdShort;
+            var writeStream = isShort ? _shortStream : _longStream;
+            writeStream.Write(PadReport(request));
 
-            for (var attempt = 0; attempt < 5; attempt++)
+            foreach (var readStream in new[] { _longStream, _shortStream })
             {
-                try
-                {
-                    var read = readStream.Read(readBuffer, 0, readBuffer.Length);
-                    if (read <= 0)
-                    {
-                        Thread.Sleep(5);
-                        continue;
-                    }
+                var readLength = readStream == _shortStream ? ShortReportLength : LongReportLength;
+                var readBuffer = new byte[readLength];
 
-                    Array.Copy(readBuffer, response, Math.Min(readBuffer.Length, response.Length));
-                    if (IsSuccessfulResponse(request, response))
-                    {
-                        return true;
-                    }
-                }
-                catch (TimeoutException)
+                for (var attempt = 0; attempt < 5; attempt++)
                 {
-                    break;
+                    try
+                    {
+                        readStream.ReadTimeout = readStream == _shortStream ? 500 : 1000;
+                        var read = readStream.Read(readBuffer, 0, readBuffer.Length);
+                        if (read <= 0)
+                        {
+                            Thread.Sleep(5);
+                            continue;
+                        }
+
+                        Array.Copy(readBuffer, response, Math.Min(readBuffer.Length, response.Length));
+                        if (IsSuccessfulResponse(request, response))
+                        {
+                            return true;
+                        }
+                    }
+                    catch (TimeoutException)
+                    {
+                        break;
+                    }
                 }
             }
         }
 
         return false;
+    }
+
+    private static bool IsAsyncNotification(byte[] report)
+    {
+        if (report.Length == 0)
+        {
+            return false;
+        }
+
+        if (report[0] == Hidpp20Constants.ReportIdShortNotification)
+        {
+            return true;
+        }
+
+        if (report[0] != Hidpp20Constants.ReportIdLong)
+        {
+            return false;
+        }
+
+        return report[3] == Hidpp20Constants.CmdRgbEffectsEventNotification;
     }
 
     private static bool IsSuccessfulResponse(byte[] request, byte[] response)

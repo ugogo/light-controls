@@ -5,13 +5,20 @@ using LightControls.Core.Settings;
 
 namespace LightControls.Core.Logitech;
 
-public sealed class LogitechDirectBackend(LightControlsSettings settings) : IRgbBackend
+public sealed class LogitechDirectBackend(LightControlsSettings settings) : IRgbBackend, IDisposable
 {
+    private readonly LogitechMouseLightingHost _lightingHost = new();
+
     public Task<bool> IsServerReachableAsync(CancellationToken cancellationToken = default)
     {
         if (!settings.EnableLogitechDirect)
         {
             return Task.FromResult(false);
+        }
+
+        if (_lightingHost.HoldsOpenSession)
+        {
+            return Task.FromResult(true);
         }
 
         return Task.Run(() => Hidpp20Session.TryOpen(out _, out _), cancellationToken);
@@ -24,6 +31,11 @@ public sealed class LogitechDirectBackend(LightControlsSettings settings) : IRgb
             return Task.FromResult<IReadOnlyList<RgbDevice>>([]);
         }
 
+        if (_lightingHost.HoldsOpenSession)
+        {
+            return Task.FromResult<IReadOnlyList<RgbDevice>>([CreateDevice()]);
+        }
+
         return Task.Run<IReadOnlyList<RgbDevice>>(() =>
         {
             if (!Hidpp20Session.TryOpen(out _, out _))
@@ -31,20 +43,7 @@ public sealed class LogitechDirectBackend(LightControlsSettings settings) : IRgb
                 return [];
             }
 
-            return
-            [
-                new RgbDevice(
-                    LogitechDeviceIds.ProX2Superlight2DeviceId,
-                    -1,
-                    LogitechDeviceIds.ProX2Superlight2Name,
-                    "Logitech",
-                    "RGB (direct HID++)",
-                    string.Empty,
-                    "HID",
-                    1,
-                    true,
-                    "Ready")
-            ];
+            return [CreateDevice()];
         }, cancellationToken);
     }
 
@@ -61,31 +60,33 @@ public sealed class LogitechDirectBackend(LightControlsSettings settings) : IRgb
 
         return Task.Run(() =>
         {
-            if (!Hidpp20Session.TryOpen(out var session, out var openError) || session is null)
-            {
-                return new ApplyColorResult(
-                [
-                    new DeviceApplyResult(
-                        LogitechDeviceIds.ProX2Superlight2DeviceId,
-                        LogitechDeviceIds.ProX2Superlight2Name,
-                        false,
-                        openError ?? "Mouse not found")
-                ]);
-            }
-
-            using (session)
-            {
-                var adjusted = apply.Color.WithBrightness(apply.BrightnessPercent);
-                var succeeded = session.TrySetPowerLedColor(adjusted.Red, adjusted.Green, adjusted.Blue, out var error);
-                return new ApplyColorResult(
-                [
-                    new DeviceApplyResult(
-                        LogitechDeviceIds.ProX2Superlight2DeviceId,
-                        LogitechDeviceIds.ProX2Superlight2Name,
-                        succeeded,
-                        succeeded ? "Applied" : error ?? "Failed")
-                ]);
-            }
+            var succeeded = _lightingHost.Apply(apply, out var error);
+            return new ApplyColorResult(
+            [
+                new DeviceApplyResult(
+                    LogitechDeviceIds.ProX2Superlight2DeviceId,
+                    LogitechDeviceIds.ProX2Superlight2Name,
+                    succeeded,
+                    succeeded ? "Applied" : error ?? "Failed")
+            ]);
         }, cancellationToken);
     }
+
+    public void Dispose()
+    {
+        _lightingHost.Dispose();
+    }
+
+    private static RgbDevice CreateDevice() =>
+        new(
+            LogitechDeviceIds.ProX2Superlight2DeviceId,
+            -1,
+            LogitechDeviceIds.ProX2Superlight2Name,
+            "Logitech",
+            "RGB (direct HID++)",
+            string.Empty,
+            "HID",
+            1,
+            true,
+            "Ready");
 }

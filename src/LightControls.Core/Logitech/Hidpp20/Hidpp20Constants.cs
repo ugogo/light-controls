@@ -4,9 +4,15 @@ internal static class Hidpp20Constants
 {
     public const byte ReportIdShort = 0x10;
     public const byte ReportIdLong = 0x11;
+    public const byte ReportIdShortNotification = 0x12;
 
     public const byte ReceiverDeviceIndex = 0xFF;
     public const byte DefaultMouseDeviceIndex = 0x01;
+
+    public const byte RgbSwControlCluster = 0x01;
+    public const byte RgbSwControlMode = 0x03;
+    public const byte RgbSwControlActiveFlags = 0x05;
+    public const byte RgbSwControlReleaseFlags = 0x00;
 
     public const ushort FeatureRoot = 0x0000;
     public const ushort FeatureColorLedEffects = 0x8070;
@@ -28,6 +34,8 @@ internal static class Hidpp20Constants
     public const byte CmdRgbEffectsGetInfo = 0x00;
     public const byte CmdRgbEffectsSetClusterEffect = 0x10;
     public const byte CmdRgbEffectsManageSwControl = 0x50;
+    public const byte CmdRgbEffectsEventNotification = 0x60;
+    public const byte CmdRgbEffectsSetPowerSave = 0x70;
 
     /// <summary>Effect mode for a fixed/solid RGB color on 8071 devices.</summary>
     public const ushort RgbEffectModeOn = 0x0001;
