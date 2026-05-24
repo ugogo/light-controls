@@ -3,6 +3,9 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Media;
+using LightControls.Core;
+using LightControls.Core.Abstractions;
+using LightControls.Core.Logitech;
 using LightControls.Core.Models;
 using LightControls.Core.OpenRgb;
 using LightControls.Core.Settings;
@@ -15,7 +18,7 @@ public partial class MainWindow : Window
 {
     private readonly SettingsStore _settingsStore = new();
     private LightControlsSettings _settings = new();
-    private OpenRgbBackend? _backend;
+    private IRgbBackend? _backend;
     private OpenRgbSetupManager? _setupManager;
     private RgbColor _selectedColor = RgbColor.FromHex("#00A8FF");
     private bool _busy;
@@ -34,8 +37,9 @@ public partial class MainWindow : Window
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
         _settings = await _settingsStore.LoadAsync();
-        _backend = new OpenRgbBackend(_settings);
-        _setupManager = new OpenRgbSetupManager(_settings, _backend);
+        var openRgbBackend = new OpenRgbBackend(_settings);
+        _backend = new CompositeRgbBackend(openRgbBackend, new LogitechDirectBackend(_settings));
+        _setupManager = new OpenRgbSetupManager(_settings, openRgbBackend);
 
         LoadPresets();
         SetSelectedColor(_settings.LastColor);
@@ -52,15 +56,30 @@ public partial class MainWindow : Window
         await RunBusyAsync("Checking lighting support...", async () =>
         {
             var progress = CreateSetupProgress();
-            var status = await _setupManager.GetStatusAsync();
-            if (status.State == OpenRgbSetupState.ServerRunning)
+            if (_backend is not null && await _backend.IsServerReachableAsync())
+            {
+                var status = await _setupManager.GetStatusAsync();
+                if (status.State != OpenRgbSetupState.ServerRunning
+                    && status.State == OpenRgbSetupState.InstalledButStopped)
+                {
+                    _ = await _setupManager.EnsureServerRunningAsync(progress);
+                    await _settingsStore.SaveAsync(_settings);
+                }
+
+                ShowMain("Lighting support is ready.");
+                await LoadDevicesAsync();
+                return;
+            }
+
+            var setupStatus = await _setupManager.GetStatusAsync();
+            if (setupStatus.State == OpenRgbSetupState.ServerRunning)
             {
                 ShowMain("Lighting support is ready.");
                 await LoadDevicesAsync();
                 return;
             }
 
-            if (status.State == OpenRgbSetupState.InstalledButStopped)
+            if (setupStatus.State == OpenRgbSetupState.InstalledButStopped)
             {
                 var launchStatus = await _setupManager.EnsureServerRunningAsync(progress);
                 await _settingsStore.SaveAsync(_settings);
@@ -75,7 +94,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            ShowSetup(status.Message);
+            ShowSetup(setupStatus.Message);
         });
     }
 
@@ -310,7 +329,9 @@ public sealed class DeviceItem(RgbDevice device, bool isSelected) : INotifyPrope
 
     public string Name => string.IsNullOrWhiteSpace(device.Vendor) ? device.Name : $"{device.Vendor} {device.Name}";
 
-    public string Details => $"{device.LedCount} LEDs - {device.Status}";
+    public string Details => device.Zones.Count > 0
+        ? $"{device.LedCount} LEDs · {string.Join(", ", device.Zones.Select(zone => $"{zone.Name} ({zone.LedCount})"))} · {device.Status}"
+        : $"{device.LedCount} LEDs - {device.Status}";
 
     public bool IsEnabled => device.IsSupported;
 

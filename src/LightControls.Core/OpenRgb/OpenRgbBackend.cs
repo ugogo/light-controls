@@ -54,7 +54,7 @@ public sealed class OpenRgbBackend(LightControlsSettings settings) : IRgbBackend
 
             try
             {
-                await client.ApplyColorAsync(device.ControllerIndex, device.LedCount, color, cancellationToken);
+                await client.ApplyColorAsync(device, color, cancellationToken);
                 results.Add(new DeviceApplyResult(device.Id, device.Name, true, "Applied"));
             }
             catch (Exception ex)

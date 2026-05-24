@@ -10,6 +10,11 @@ public sealed class LightControlsSettings
 
     public string? OpenRgbExecutablePath { get; set; }
 
+    /// <summary>
+    /// When true, detects and controls Logitech PRO X Superlight 2 power LED via direct HID++ (no OpenRGB).
+    /// </summary>
+    public bool EnableLogitechDirect { get; set; } = true;
+
     public string LastColor { get; set; } = "#00A8FF";
 
     public List<string> SelectedDeviceIds { get; set; } = [];

@@ -13,7 +13,8 @@ public sealed class OpenRgbProtocolClient : IAsyncDisposable
     private const uint PacketSetClientName = 50;
     private const uint PacketUpdateLeds = 1050;
     private const uint PacketSetCustomMode = 1100;
-    private const uint ClientProtocolVersion = 1;
+    private const uint PacketUpdateMode = 1101;
+    private const uint ClientProtocolVersion = 5;
     private const int HeaderLength = 16;
 
     private readonly TcpClient _tcpClient = new();
@@ -45,26 +46,26 @@ public sealed class OpenRgbProtocolClient : IAsyncDisposable
         return devices;
     }
 
-    public async Task ApplyColorAsync(int controllerIndex, int ledCount, RgbColor color, CancellationToken cancellationToken = default)
+    public async Task ApplyColorAsync(RgbDevice device, RgbColor color, CancellationToken cancellationToken = default)
     {
-        if (ledCount <= 0)
+        if (device.LedCount <= 0)
         {
             throw new InvalidOperationException("Device does not report controllable LEDs.");
         }
 
-        await SendAsync(PacketSetCustomMode, (uint)controllerIndex, [], cancellationToken);
+        var controllerIndex = (uint)device.ControllerIndex;
+        await SendAsync(PacketSetCustomMode, controllerIndex, [], cancellationToken);
 
-        var payload = new byte[4 + 2 + ledCount * 4];
-        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0, 4), (uint)payload.Length);
-        BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(4, 2), (ushort)ledCount);
-
-        var openRgbColor = color.ToOpenRgbColor();
-        for (var index = 0; index < ledCount; index++)
+        var modeIndex = OpenRgbMode.FindCustomModeIndex(device.Modes) ?? device.ActiveModeIndex;
+        var mode = device.Modes.FirstOrDefault(candidate => candidate.Index == modeIndex);
+        if (mode is not null)
         {
-            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(6 + index * 4, 4), openRgbColor);
+            var modePayload = mode.PackUpdateModePayload(_protocolVersion);
+            await SendAsync(PacketUpdateMode, controllerIndex, modePayload, cancellationToken);
         }
 
-        await SendAsync(PacketUpdateLeds, (uint)controllerIndex, payload, cancellationToken);
+        var payload = BuildUpdateLedsPayload(device.LedCount, color);
+        await SendAsync(PacketUpdateLeds, controllerIndex, payload, cancellationToken);
     }
 
     public ValueTask DisposeAsync()
@@ -179,16 +180,18 @@ public sealed class OpenRgbProtocolClient : IAsyncDisposable
         var location = reader.ReadString();
 
         var modeCount = reader.ReadUInt16();
-        _ = reader.ReadInt32();
-        for (var mode = 0; mode < modeCount; mode++)
+        var activeModeIndex = reader.ReadInt32();
+        var modes = new List<OpenRgbMode>(modeCount);
+        for (var modeIndex = 0; modeIndex < modeCount; modeIndex++)
         {
-            SkipMode(reader);
+            modes.Add(ReadMode(reader, modeIndex));
         }
 
         var zoneCount = reader.ReadUInt16();
-        for (var zone = 0; zone < zoneCount; zone++)
+        var zones = new List<OpenRgbZone>(zoneCount);
+        for (var zoneIndex = 0; zoneIndex < zoneCount; zoneIndex++)
         {
-            SkipZone(reader);
+            zones.Add(ReadZone(reader));
         }
 
         var ledCount = reader.ReadUInt16();
@@ -201,7 +204,20 @@ public sealed class OpenRgbProtocolClient : IAsyncDisposable
         var colorCount = reader.ReadUInt16();
         reader.Skip(colorCount * 4);
 
-        var isSupported = ledCount > 0;
+        if (_protocolVersion >= 5)
+        {
+            var altNameCount = reader.ReadUInt16();
+            for (var altNameIndex = 0; altNameIndex < altNameCount; altNameIndex++)
+            {
+                _ = reader.ReadString();
+            }
+
+            _ = reader.ReadUInt32();
+        }
+
+        var totalZoneLeds = zones.Sum(zone => zone.LedCount);
+        var effectiveLedCount = ledCount > 0 ? ledCount : totalZoneLeds;
+        var isSupported = effectiveLedCount > 0;
         var id = CreateStableId(controllerIndex, vendor, name, serial, location);
         return new RgbDevice(
             id,
@@ -211,29 +227,116 @@ public sealed class OpenRgbProtocolClient : IAsyncDisposable
             description,
             serial,
             location,
-            ledCount,
+            effectiveLedCount,
             isSupported,
-            isSupported ? "Ready" : "No controllable LEDs reported");
+            isSupported ? "Ready" : "No controllable LEDs reported",
+            modes,
+            activeModeIndex,
+            zones);
     }
 
-    private void SkipMode(OpenRgbProtocolReader reader)
+    private OpenRgbMode ReadMode(OpenRgbProtocolReader reader, int modeIndex)
     {
-        _ = reader.ReadString();
-        reader.Skip(4 + 4 + 4 + 4);
-        reader.Skip(4 + 4 + 4 + 4);
+        var name = reader.ReadString();
+        var value = reader.ReadInt32();
+        var flags = reader.ReadUInt32();
+        var speedMin = reader.ReadUInt32();
+        var speedMax = reader.ReadUInt32();
+
+        uint? brightnessMin = null;
+        uint? brightnessMax = null;
+        if (_protocolVersion >= 3)
+        {
+            brightnessMin = reader.ReadUInt32();
+            brightnessMax = reader.ReadUInt32();
+        }
+
+        var colorsMin = reader.ReadUInt32();
+        var colorsMax = reader.ReadUInt32();
+        var speed = reader.ReadUInt32();
+
+        uint? brightness = null;
+        if (_protocolVersion >= 3)
+        {
+            brightness = reader.ReadUInt32();
+        }
+
+        var direction = reader.ReadUInt32();
+        var colorMode = reader.ReadUInt32();
         var colorCount = reader.ReadUInt16();
-        reader.Skip(colorCount * 4);
+        var modeColors = new List<uint>(colorCount);
+        for (var colorIndex = 0; colorIndex < colorCount; colorIndex++)
+        {
+            modeColors.Add(reader.ReadUInt32());
+        }
+
+        return new OpenRgbMode(
+            modeIndex,
+            name,
+            value,
+            flags,
+            speedMin,
+            speedMax,
+            brightnessMin,
+            brightnessMax,
+            colorsMin,
+            colorsMax,
+            speed,
+            brightness,
+            direction,
+            colorMode,
+            modeColors);
     }
 
-    private void SkipZone(OpenRgbProtocolReader reader)
+    private OpenRgbZone ReadZone(OpenRgbProtocolReader reader)
     {
-        _ = reader.ReadString();
-        reader.Skip(4 + 4 + 4 + 4);
+        var name = reader.ReadString();
+        _ = reader.ReadInt32();
+        _ = reader.ReadUInt32();
+        _ = reader.ReadUInt32();
+        var ledCount = checked((int)reader.ReadUInt32());
         var matrixLength = reader.ReadUInt16();
         if (matrixLength > 0)
         {
             reader.Skip(matrixLength);
         }
+
+        if (_protocolVersion >= 4)
+        {
+            var segmentCount = reader.ReadUInt16();
+            for (var segmentIndex = 0; segmentIndex < segmentCount; segmentIndex++)
+            {
+                SkipSegment(reader);
+            }
+        }
+
+        if (_protocolVersion >= 5)
+        {
+            _ = reader.ReadUInt32();
+        }
+
+        return new OpenRgbZone(name, ledCount);
+    }
+
+    private static void SkipSegment(OpenRgbProtocolReader reader)
+    {
+        _ = reader.ReadString();
+        reader.Skip(sizeof(int) + sizeof(uint) + sizeof(uint));
+    }
+
+    private static byte[] BuildUpdateLedsPayload(int ledCount, RgbColor color)
+    {
+        var payload = new byte[4 + 2 + ledCount * 4];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0, 4), (uint)payload.Length);
+        BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(4, 2), (ushort)ledCount);
+
+        var openRgbColor = color.ToOpenRgbColor();
+        for (var index = 0; index < ledCount; index++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(6 + index * 4, 4), openRgbColor);
+        }
+
+        return payload;
     }
 
     private static string CreateStableId(uint controllerIndex, string vendor, string name, string serial, string location)
