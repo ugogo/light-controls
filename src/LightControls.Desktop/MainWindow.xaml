@@ -1,0 +1,161 @@
+<Window x:Class="LightControls.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Light Controls" Height="760" Width="1080" MinHeight="620" MinWidth="880"
+        Loaded="Window_Loaded"
+        Background="#202124"
+        Foreground="#F7F8FA">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="14,8" />
+            <Setter Property="Cursor" Value="Hand" />
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="MinHeight" Value="32" />
+        </Style>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="#2A2B30" />
+            <Setter Property="BorderBrush" Value="#42444C" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="16" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Padding="24,20" Background="#2A2B30">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Light Controls" FontSize="24" FontWeight="SemiBold" />
+                    <TextBlock x:Name="StatusText" Margin="0,4,0,0" Foreground="#BEC2CC" Text="Checking lighting support..." />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button x:Name="RefreshButton" Content="Refresh" Click="RefreshButton_Click" Margin="0,0,8,0" />
+                    <Button x:Name="ApplyButton" Content="Apply" Click="ApplyButton_Click" Background="#00A8FF" Foreground="White" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="1" Margin="24">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border x:Name="SetupPanel" Style="{StaticResource Card}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Set up lighting support" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock x:Name="SetupText" TextWrapping="Wrap" Foreground="#BEC2CC" Margin="0,6,0,0" />
+                        <Button Content="Open OpenRGB releases" Click="OpenReleasesButton_Click" Margin="0,10,0,0" HorizontalAlignment="Left" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="SetupButton" Content="Download &amp; set up" Click="SetupButton_Click" Background="#00A8FF" Foreground="White" Margin="0,0,8,0" />
+                        <Button Content="Retry" Click="RetrySetupButton_Click" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Grid x:Name="MainPanel" Grid.Row="1" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.1*" />
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="0.9*" />
+                </Grid.ColumnDefinitions>
+
+                <Border Style="{StaticResource Card}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="Devices" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                        <ListBox ItemsSource="{Binding Devices}" Background="Transparent" BorderThickness="0" Foreground="#F7F8FA">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" IsEnabled="{Binding IsEnabled}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Details}" Foreground="#BEC2CC" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </Border>
+
+                <Grid Grid.Column="2">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="20" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="Color" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="64" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border x:Name="ColorPreview" Width="48" Height="36" CornerRadius="6" Background="#00A8FF" />
+                                <TextBlock x:Name="ColorText" Grid.Column="1" VerticalAlignment="Center" FontFamily="Consolas" Text="#00A8FF" />
+                                <Button Grid.Column="2" Content="Pick Color" Click="PickColorButton_Click" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Row="2" Style="{StaticResource Card}">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="Presets" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                                <TextBox x:Name="PresetNameBox" Width="180" VerticalContentAlignment="Center" />
+                                <Button Content="Save Color" Click="SavePresetButton_Click" Margin="8,0,0,0" />
+                            </StackPanel>
+                            <ListBox ItemsSource="{Binding Presets}" Background="Transparent" BorderThickness="0" Foreground="#F7F8FA">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,6">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="44" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="36" Height="36" CornerRadius="5" Background="{Binding SwatchBrush}" />
+                                            <StackPanel Grid.Column="1">
+                                                <TextBox Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                                <TextBlock Text="{Binding HexColor}" Foreground="#BEC2CC" Margin="0,3,0,0" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="8,0,0,0">
+                                                <Button Content="Use" Click="UsePresetButton_Click" Margin="0,0,6,0" />
+                                                <Button Content="Delete" Click="DeletePresetButton_Click" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

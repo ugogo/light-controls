@@ -1,0 +1,17 @@
+{
+  "name": "light-controls",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native Windows RGB lighting controller powered by OpenRGB.",
+  "scripts": {
+    "start": "dotnet run --project src/LightControls.Desktop/LightControls.Desktop.csproj",
+    "build": "dotnet build LightControls.slnx",
+    "test": "dotnet test tests/LightControls.Tests/LightControls.Tests.csproj",
+    "package": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package.ps1",
+    "launch": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/launch.ps1",
+    "verify": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1",
+    "windows:build": "dotnet build LightControls.slnx",
+    "windows:start": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/windows-start.ps1",
+    "windows:shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/create-shortcut.ps1 -BuildIfMissing"
+  }
+}
