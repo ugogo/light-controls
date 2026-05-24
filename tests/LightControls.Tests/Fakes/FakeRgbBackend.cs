@@ -13,6 +13,8 @@ internal sealed class FakeRgbBackend : IRgbBackend
 
     public RgbColor LastColor { get; private set; }
 
+    public int LastBrightnessPercent { get; private set; }
+
     public Task<bool> IsServerReachableAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult(ServerReachable);
 
@@ -22,10 +24,12 @@ internal sealed class FakeRgbBackend : IRgbBackend
     public Task<ApplyColorResult> ApplyColorAsync(
         IReadOnlyCollection<string> deviceIds,
         RgbColor color,
+        int brightnessPercent = 100,
         CancellationToken cancellationToken = default)
     {
         LastDeviceIds = deviceIds.ToArray();
         LastColor = color;
+        LastBrightnessPercent = brightnessPercent;
 
         var results = deviceIds
             .Select(id => new DeviceApplyResult(id, id, true, "Applied"))

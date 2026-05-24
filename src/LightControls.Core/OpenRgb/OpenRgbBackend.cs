@@ -30,6 +30,7 @@ public sealed class OpenRgbBackend(LightControlsSettings settings) : IRgbBackend
     public async Task<ApplyColorResult> ApplyColorAsync(
         IReadOnlyCollection<string> deviceIds,
         RgbColor color,
+        int brightnessPercent = 100,
         CancellationToken cancellationToken = default)
     {
         if (deviceIds.Count == 0)
@@ -54,7 +55,7 @@ public sealed class OpenRgbBackend(LightControlsSettings settings) : IRgbBackend
 
             try
             {
-                await client.ApplyColorAsync(device, color, cancellationToken);
+                await client.ApplyColorAsync(device, color, brightnessPercent, cancellationToken);
                 results.Add(new DeviceApplyResult(device.Id, device.Name, true, "Applied"));
             }
             catch (Exception ex)

@@ -120,6 +120,29 @@
                                 <TextBlock x:Name="ColorText" Grid.Column="1" VerticalAlignment="Center" FontFamily="Consolas" Text="#00A8FF" />
                                 <Button Grid.Column="2" Content="Pick Color" Click="PickColorButton_Click" />
                             </Grid>
+                            <Grid Margin="0,16,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="40" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Brightness" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                <Slider x:Name="BrightnessSlider"
+                                        Grid.Column="1"
+                                        Minimum="1"
+                                        Maximum="100"
+                                        Value="100"
+                                        TickFrequency="10"
+                                        IsSnapToTickEnabled="False"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="BrightnessSlider_ValueChanged" />
+                                <TextBlock x:Name="BrightnessText"
+                                           Grid.Column="2"
+                                           Text="100%"
+                                           VerticalAlignment="Center"
+                                           HorizontalAlignment="Right"
+                                           Foreground="#BEC2CC" />
+                            </Grid>
                         </StackPanel>
                     </Border>
 

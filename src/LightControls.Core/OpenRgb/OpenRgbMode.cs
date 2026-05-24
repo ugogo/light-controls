@@ -20,10 +20,32 @@ public sealed record OpenRgbMode(
     uint ColorMode,
     IReadOnlyList<uint> ModeColors)
 {
+    private const uint ModeFlagHasBrightness = 1 << 4;
     private const uint ModeColorsPerLed = 1;
     private const uint ModeColorsModeSpecific = 2;
 
     private static readonly string[] CustomModeNames = ["Direct", "Custom", "Static"];
+
+    public bool SupportsBrightness => (Flags & ModeFlagHasBrightness) != 0;
+
+    public OpenRgbMode WithBrightnessPercent(int brightnessPercent)
+    {
+        if (!SupportsBrightness)
+        {
+            return this;
+        }
+
+        var min = BrightnessMin ?? 0;
+        var max = BrightnessMax ?? min;
+        if (max < min)
+        {
+            (min, max) = (max, min);
+        }
+
+        var scale = Math.Clamp(brightnessPercent, 0, 100) / 100d;
+        var brightness = min + (uint)Math.Round((max - min) * scale);
+        return this with { Brightness = brightness };
+    }
 
     public static int? FindCustomModeIndex(IReadOnlyList<OpenRgbMode> modes)
     {

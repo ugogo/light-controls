@@ -17,6 +17,9 @@ public sealed class LightControlsSettings
 
     public string LastColor { get; set; } = "#00A8FF";
 
+    /// <summary>Brightness level applied to devices, 0–100.</summary>
+    public int LastBrightness { get; set; } = 100;
+
     public List<string> SelectedDeviceIds { get; set; } = [];
 
     public List<ColorPreset> Presets { get; set; } =

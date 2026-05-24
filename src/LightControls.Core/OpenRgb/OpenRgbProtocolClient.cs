@@ -46,7 +46,11 @@ public sealed class OpenRgbProtocolClient : IAsyncDisposable
         return devices;
     }
 
-    public async Task ApplyColorAsync(RgbDevice device, RgbColor color, CancellationToken cancellationToken = default)
+    public async Task ApplyColorAsync(
+        RgbDevice device,
+        RgbColor color,
+        int brightnessPercent = 100,
+        CancellationToken cancellationToken = default)
     {
         if (device.LedCount <= 0)
         {
@@ -58,13 +62,16 @@ public sealed class OpenRgbProtocolClient : IAsyncDisposable
 
         var modeIndex = OpenRgbMode.FindCustomModeIndex(device.Modes) ?? device.ActiveModeIndex;
         var mode = device.Modes.FirstOrDefault(candidate => candidate.Index == modeIndex);
+        var usesHardwareBrightness = mode?.SupportsBrightness == true;
         if (mode is not null)
         {
+            mode = mode.WithBrightnessPercent(brightnessPercent);
             var modePayload = mode.PackUpdateModePayload(_protocolVersion);
             await SendAsync(PacketUpdateMode, controllerIndex, modePayload, cancellationToken);
         }
 
-        var payload = BuildUpdateLedsPayload(device.LedCount, color);
+        var ledColor = usesHardwareBrightness ? color : color.WithBrightness(brightnessPercent);
+        var payload = BuildUpdateLedsPayload(device.LedCount, ledColor);
         await SendAsync(PacketUpdateLeds, controllerIndex, payload, cancellationToken);
     }
 

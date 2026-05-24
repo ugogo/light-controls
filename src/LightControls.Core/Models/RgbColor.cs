@@ -31,4 +31,16 @@ public readonly record struct RgbColor(byte Red, byte Green, byte Blue)
     public string ToHex() => $"#{Red:X2}{Green:X2}{Blue:X2}";
 
     public uint ToOpenRgbColor() => (uint)(Red | (Green << 8) | (Blue << 16));
+
+    public RgbColor WithBrightness(int brightnessPercent)
+    {
+        var scale = Math.Clamp(brightnessPercent, 0, 100) / 100d;
+        return new RgbColor(
+            ScaleChannel(Red, scale),
+            ScaleChannel(Green, scale),
+            ScaleChannel(Blue, scale));
+    }
+
+    private static byte ScaleChannel(byte channel, double scale) =>
+        (byte)Math.Clamp(Math.Round(channel * scale), 0, 255);
 }

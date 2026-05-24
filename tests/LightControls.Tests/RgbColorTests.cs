@@ -22,4 +22,14 @@ public sealed class RgbColorTests
 
         Assert.Equal(0x00563412u, color.ToOpenRgbColor());
     }
+
+    [Fact]
+    public void WithBrightness_ScalesChannels()
+    {
+        var color = new RgbColor(200, 100, 50).WithBrightness(50);
+
+        Assert.Equal((byte)100, color.Red);
+        Assert.Equal((byte)50, color.Green);
+        Assert.Equal((byte)25, color.Blue);
+    }
 }

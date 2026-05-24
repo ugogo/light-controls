@@ -15,7 +15,8 @@ public sealed class LightingControllerTests
         var store = new SettingsStore(path);
         var settings = new LightControlsSettings
         {
-            SelectedDeviceIds = ["keyboard", "mouse"]
+            SelectedDeviceIds = ["keyboard", "mouse"],
+            LastBrightness = 75
         };
         var backend = new FakeRgbBackend();
         var controller = new LightingController(backend, store, settings);
@@ -27,6 +28,7 @@ public sealed class LightingControllerTests
         Assert.True(result.Succeeded);
         Assert.Equal(["keyboard", "mouse"], backend.LastDeviceIds);
         Assert.Equal(color, backend.LastColor);
+        Assert.Equal(75, backend.LastBrightnessPercent);
         Assert.Equal("#010203", persisted.LastColor);
     }
 }

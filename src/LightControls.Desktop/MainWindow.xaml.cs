@@ -43,6 +43,8 @@ public partial class MainWindow : Window
 
         LoadPresets();
         SetSelectedColor(_settings.LastColor);
+        BrightnessSlider.Value = Math.Clamp(_settings.LastBrightness, 1, 100);
+        UpdateBrightnessLabel();
         await InitializeLightingAsync();
     }
 
@@ -148,15 +150,17 @@ public partial class MainWindow : Window
 
         await RunBusyAsync("Applying color...", async () =>
         {
-            var result = await _backend.ApplyColorAsync(selectedIds, _selectedColor);
+            var brightness = (int)Math.Round(BrightnessSlider.Value);
+            var result = await _backend.ApplyColorAsync(selectedIds, _selectedColor, brightness);
             _settings.LastColor = _selectedColor.ToHex();
+            _settings.LastBrightness = brightness;
             _settings.SelectedDeviceIds = selectedIds;
             _settings.Presets = Presets.Select(preset => preset.ToPreset()).ToList();
             await _settingsStore.SaveAsync(_settings);
 
             var failures = result.Devices.Where(device => !device.Succeeded).ToList();
             StatusText.Text = failures.Count == 0
-                ? $"Applied {_selectedColor.ToHex()} to {result.Devices.Count} device(s)."
+                ? $"Applied {_selectedColor.ToHex()} at {brightness}% to {result.Devices.Count} device(s)."
                 : $"Applied with {failures.Count} device issue(s): {string.Join(", ", failures.Select(failure => failure.DeviceName))}";
         });
     }
@@ -258,9 +262,25 @@ public partial class MainWindow : Window
         ColorPreview.Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(_selectedColor.Red, _selectedColor.Green, _selectedColor.Blue));
     }
 
+    private void BrightnessSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (!IsLoaded)
+        {
+            return;
+        }
+
+        UpdateBrightnessLabel();
+    }
+
+    private void UpdateBrightnessLabel()
+    {
+        BrightnessText.Text = $"{(int)Math.Round(BrightnessSlider.Value)}%";
+    }
+
     private async Task PersistCurrentSettingsAsync()
     {
         _settings.LastColor = _selectedColor.ToHex();
+        _settings.LastBrightness = (int)Math.Round(BrightnessSlider.Value);
         _settings.SelectedDeviceIds = Devices.Where(device => device.IsSelected && device.IsEnabled).Select(device => device.Id).ToList();
         _settings.Presets = Presets.Select(preset => preset.ToPreset()).ToList();
         await _settingsStore.SaveAsync(_settings);

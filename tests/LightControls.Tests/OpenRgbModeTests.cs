@@ -18,6 +18,22 @@ public sealed class OpenRgbModeTests
     }
 
     [Fact]
+    public void WithBrightnessPercent_MapsToDeviceRange()
+    {
+        var mode = CreateMode(0, "Direct", colorMode: 1) with
+        {
+            Flags = 1 << 4,
+            BrightnessMin = 0,
+            BrightnessMax = 4,
+            Brightness = 0
+        };
+
+        var updated = mode.WithBrightnessPercent(100);
+
+        Assert.Equal(4u, updated.Brightness);
+    }
+
+    [Fact]
     public void PackUpdateModePayload_IncludesLeadingDataSize()
     {
         var mode = CreateMode(2, "Direct", colorMode: 1);

@@ -8,7 +8,7 @@ public sealed class LightingController(IRgbBackend backend, SettingsStore settin
 {
     public async Task<ApplyColorResult> ApplyToSelectedDevicesAsync(RgbColor color, CancellationToken cancellationToken = default)
     {
-        var result = await backend.ApplyColorAsync(settings.SelectedDeviceIds, color, cancellationToken);
+        var result = await backend.ApplyColorAsync(settings.SelectedDeviceIds, color, settings.LastBrightness, cancellationToken);
         settings.LastColor = color.ToHex();
         await settingsStore.SaveAsync(settings, cancellationToken);
         return result;
