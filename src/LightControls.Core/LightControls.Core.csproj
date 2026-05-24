@@ -14,4 +14,8 @@
     <ProjectReference Include="..\..\..\dx-light\Windows\DXLight.Core\DXLight.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="LightControls.Tests" />
+  </ItemGroup>
+
 </Project>

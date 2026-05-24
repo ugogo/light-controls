@@ -7,15 +7,19 @@ namespace LightControls.Core.OpenRgb;
 
 public sealed class OpenRgbProtocolClient : IAsyncDisposable
 {
+    internal const int DefaultArgbHeaderLedCount = 30;
     private const uint PacketRequestControllerCount = 0;
     private const uint PacketRequestControllerData = 1;
     private const uint PacketRequestProtocolVersion = 40;
     private const uint PacketSetClientName = 50;
     private const uint PacketUpdateLeds = 1050;
+    private const uint PacketUpdateZoneLeds = 1051;
+    private const uint PacketResizeZone = 1000;
     private const uint PacketSetCustomMode = 1100;
     private const uint PacketUpdateMode = 1101;
     private const uint ClientProtocolVersion = 5;
     private const int HeaderLength = 16;
+    private static readonly TimeSpan SdkStepDelay = TimeSpan.FromMilliseconds(50);
 
     private readonly TcpClient _tcpClient = new();
     private NetworkStream? _stream;
@@ -59,18 +63,30 @@ public sealed class OpenRgbProtocolClient : IAsyncDisposable
 
         var controllerIndex = (uint)device.ControllerIndex;
         await SendAsync(PacketSetCustomMode, controllerIndex, [], cancellationToken);
+        await Task.Delay(SdkStepDelay, cancellationToken);
 
         var modeIndex = OpenRgbMode.FindCustomModeIndex(device.Modes) ?? device.ActiveModeIndex;
         var mode = device.Modes.FirstOrDefault(candidate => candidate.Index == modeIndex);
         var usesHardwareBrightness = mode?.SupportsBrightness == true;
-        if (mode is not null)
+        if (mode is not null && usesHardwareBrightness)
         {
             mode = mode.WithBrightnessPercent(brightnessPercent);
             var modePayload = mode.PackUpdateModePayload(_protocolVersion);
             await SendAsync(PacketUpdateMode, controllerIndex, modePayload, cancellationToken);
+            await Task.Delay(SdkStepDelay, cancellationToken);
         }
 
         var ledColor = usesHardwareBrightness ? color : color.WithBrightness(brightnessPercent);
+        if (ShouldUseZoneApply(device))
+        {
+            await ApplyColorViaZonesAsync(
+                controllerIndex,
+                device.Zones,
+                ledColor,
+                cancellationToken);
+            return;
+        }
+
         var payload = BuildUpdateLedsPayload(device.LedCount, ledColor);
         await SendAsync(PacketUpdateLeds, controllerIndex, payload, cancellationToken);
     }
@@ -198,7 +214,7 @@ public sealed class OpenRgbProtocolClient : IAsyncDisposable
         var zones = new List<OpenRgbZone>(zoneCount);
         for (var zoneIndex = 0; zoneIndex < zoneCount; zoneIndex++)
         {
-            zones.Add(ReadZone(reader));
+            zones.Add(ReadZone(reader, zoneIndex));
         }
 
         var ledCount = reader.ReadUInt16();
@@ -295,12 +311,12 @@ public sealed class OpenRgbProtocolClient : IAsyncDisposable
             modeColors);
     }
 
-    private OpenRgbZone ReadZone(OpenRgbProtocolReader reader)
+    private OpenRgbZone ReadZone(OpenRgbProtocolReader reader, int zoneIndex)
     {
         var name = reader.ReadString();
         _ = reader.ReadInt32();
-        _ = reader.ReadUInt32();
-        _ = reader.ReadUInt32();
+        var ledMin = checked((int)reader.ReadUInt32());
+        var ledMax = checked((int)reader.ReadUInt32());
         var ledCount = checked((int)reader.ReadUInt32());
         var matrixLength = reader.ReadUInt16();
         if (matrixLength > 0)
@@ -322,7 +338,74 @@ public sealed class OpenRgbProtocolClient : IAsyncDisposable
             _ = reader.ReadUInt32();
         }
 
-        return new OpenRgbZone(name, ledCount);
+        return new OpenRgbZone(zoneIndex, name, ledMin, ledMax, ledCount);
+    }
+
+    private static bool ShouldUseZoneApply(RgbDevice device) =>
+        device.Zones.Count > 0
+        && (device.Zones.Count > 1 || device.Zones.Any(zone => zone.IsResizable));
+
+    private async Task ApplyColorViaZonesAsync(
+        uint controllerIndex,
+        IReadOnlyList<OpenRgbZone> zones,
+        RgbColor color,
+        CancellationToken cancellationToken)
+    {
+        foreach (var zone in zones)
+        {
+            var targetCount = ResolveZoneLedCount(zone);
+            if (targetCount <= 0)
+            {
+                continue;
+            }
+
+            if (zone.IsResizable && targetCount != zone.LedCount)
+            {
+                await SendAsync(PacketResizeZone, controllerIndex, BuildResizeZonePayload(zone.Index, targetCount), cancellationToken);
+                await Task.Delay(SdkStepDelay, cancellationToken);
+            }
+
+            var payload = BuildUpdateZoneLedsPayload(zone.Index, targetCount, color);
+            await SendAsync(PacketUpdateZoneLeds, controllerIndex, payload, cancellationToken);
+            await Task.Delay(SdkStepDelay, cancellationToken);
+        }
+    }
+
+    internal static int ResolveZoneLedCount(OpenRgbZone zone)
+    {
+        if (OpenRgbZone.IsArgbHeaderZone(zone.Name) && zone.IsResizable)
+        {
+            return Math.Clamp(
+                DefaultArgbHeaderLedCount,
+                Math.Max(zone.LedMin, 1),
+                Math.Max(zone.LedMax, 1));
+        }
+
+        return Math.Max(zone.LedCount, 1);
+    }
+
+    private static byte[] BuildResizeZonePayload(int zoneIndex, int newSize)
+    {
+        var payload = new byte[8];
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(0, 4), zoneIndex);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(4, 4), newSize);
+        return payload;
+    }
+
+    internal static byte[] BuildUpdateZoneLedsPayload(int zoneIndex, int ledCount, RgbColor color)
+    {
+        var payload = new byte[4 + 4 + 2 + ledCount * 4];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0, 4), (uint)payload.Length);
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(4, 4), (uint)zoneIndex);
+        BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(8, 2), (ushort)ledCount);
+
+        var openRgbColor = color.ToOpenRgbColor();
+        for (var index = 0; index < ledCount; index++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(10 + index * 4, 4), openRgbColor);
+        }
+
+        return payload;
     }
 
     private static void SkipSegment(OpenRgbProtocolReader reader)
