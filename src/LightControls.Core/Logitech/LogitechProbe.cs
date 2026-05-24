@@ -16,8 +16,20 @@ public static class LogitechProbe
             lines.Add($"8070: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureColorLedEffects, out var colorLed)} -> {colorLed}");
             lines.Add($"1300: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureLedSoftwareControl, out var swLed)} -> {swLed}");
 
-            var ok = session.TrySetPowerLedColor(255, 0, 0, out var setError);
-            lines.Add($"SET RED: {ok}" + (setError is null ? string.Empty : $" ({setError})"));
+            lines.Add($"8100: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureOnboardProfiles, out var onboard)} -> {onboard}");
+            lines.Add($"8071: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureRgbEffects, out var rgbEffects)} -> {rgbEffects}");
+            lines.Add($"8040: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureBrightnessControl, out var brightness)} -> {brightness}");
+
+            foreach (var (label, red, green, blue) in new[]
+                     {
+                         ("RED", (byte)255, (byte)0, (byte)0),
+                         ("GREEN", (byte)0, (byte)255, (byte)0),
+                         ("BLUE", (byte)0, (byte)0, (byte)255)
+                     })
+            {
+                var ok = session.TrySetPowerLedColor(red, green, blue, out var setError);
+                lines.Add($"SET {label}: {ok}" + (setError is null ? string.Empty : $" ({setError})"));
+            }
             return string.Join(Environment.NewLine, lines);
         }
     }

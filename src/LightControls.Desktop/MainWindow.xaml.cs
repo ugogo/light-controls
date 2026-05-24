@@ -2,7 +2,10 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
+using System.Windows.Threading;
 using LightControls.Core;
 using LightControls.Core.Abstractions;
 using LightControls.Core.Logitech;
@@ -17,35 +20,50 @@ namespace LightControls.Desktop;
 public partial class MainWindow : Window
 {
     private readonly SettingsStore _settingsStore = new();
+    private readonly DispatcherTimer _brightnessApplyTimer;
     private LightControlsSettings _settings = new();
     private IRgbBackend? _backend;
     private OpenRgbSetupManager? _setupManager;
     private RgbColor _selectedColor = RgbColor.FromHex("#00A8FF");
     private bool _busy;
+    private bool _suppressColorApply;
 
     public ObservableCollection<DeviceItem> Devices { get; } = [];
 
-    public ObservableCollection<PresetItem> Presets { get; } = [];
+    public ObservableCollection<SwatchItem> BuiltInSwatches { get; } = [];
+
+    public ObservableCollection<SwatchItem> RecentCustomSwatches { get; } = [];
 
     public MainWindow()
     {
         InitializeComponent();
+        foreach (var hex in ColorSwatches.BuiltIn)
+        {
+            BuiltInSwatches.Add(new SwatchItem(hex));
+        }
+
+        _brightnessApplyTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        _brightnessApplyTimer.Tick += BrightnessApplyTimer_Tick;
+
         DataContext = this;
         ShowSetup("Checking lighting support...");
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        _suppressColorApply = true;
         _settings = await _settingsStore.LoadAsync();
         var openRgbBackend = new OpenRgbBackend(_settings);
         _backend = new CompositeRgbBackend(openRgbBackend, new LogitechDirectBackend(_settings));
         _setupManager = new OpenRgbSetupManager(_settings, openRgbBackend);
 
-        LoadPresets();
+        LoadRecentCustomSwatches();
         SetSelectedColor(_settings.LastColor);
         BrightnessSlider.Value = Math.Clamp(_settings.LastBrightness, 1, 100);
         UpdateBrightnessLabel();
+        UpdateRecentCustomEmptyState();
         await InitializeLightingAsync();
+        _suppressColorApply = false;
     }
 
     private async Task InitializeLightingAsync()
@@ -111,22 +129,28 @@ public partial class MainWindow : Window
         {
             var devices = await _backend.GetDevicesAsync();
             Devices.Clear();
-            var selectedIds = _settings.SelectedDeviceIds.ToHashSet(StringComparer.Ordinal);
 
             foreach (var device in devices)
             {
-                var selected = selectedIds.Count == 0 ? device.IsSupported : selectedIds.Contains(device.Id);
-                Devices.Add(new DeviceItem(device, selected));
+                Devices.Add(new DeviceItem(device));
             }
 
-            StatusText.Text = Devices.Count == 0
-                ? "No compatible devices were reported by OpenRGB."
-                : $"{Devices.Count} device(s) detected.";
+            UpdateDevicesPresentation();
         }
         catch (Exception ex)
         {
             ShowSetup($"OpenRGB is installed, but the SDK server is not reachable. {ex.Message}");
         }
+    }
+
+    private void UpdateDevicesPresentation()
+    {
+        var count = Devices.Count;
+        DevicesEmptyPanel.Visibility = count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        DevicesListPanel.Visibility = count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        StatusText.Text = count == 0
+            ? "No compatible devices were reported."
+            : $"{count} device(s) detected.";
     }
 
     private async void RefreshButton_Click(object sender, RoutedEventArgs e)
@@ -136,26 +160,29 @@ public partial class MainWindow : Window
 
     private async void ApplyButton_Click(object sender, RoutedEventArgs e)
     {
+        await ApplySelectedColorAsync();
+    }
+
+    private async Task ApplySelectedColorAsync()
+    {
         if (_backend is null)
         {
             return;
         }
 
-        var selectedIds = Devices.Where(device => device.IsSelected && device.IsEnabled).Select(device => device.Id).ToList();
-        if (selectedIds.Count == 0)
+        var deviceIds = Devices.Where(device => device.IsSupported).Select(device => device.Id).ToList();
+        if (deviceIds.Count == 0)
         {
-            StatusText.Text = "Select at least one compatible device.";
+            StatusText.Text = "No compatible devices found.";
             return;
         }
 
         await RunBusyAsync("Applying color...", async () =>
         {
             var brightness = (int)Math.Round(BrightnessSlider.Value);
-            var result = await _backend.ApplyColorAsync(selectedIds, _selectedColor, brightness);
+            var result = await _backend.ApplyColorAsync(deviceIds, _selectedColor, brightness);
             _settings.LastColor = _selectedColor.ToHex();
             _settings.LastBrightness = brightness;
-            _settings.SelectedDeviceIds = selectedIds;
-            _settings.Presets = Presets.Select(preset => preset.ToPreset()).ToList();
             await _settingsStore.SaveAsync(_settings);
 
             var failures = result.Devices.Where(device => !device.Succeeded).ToList();
@@ -199,7 +226,27 @@ public partial class MainWindow : Window
         OpenRgbSetupManager.OpenReleasesPage();
     }
 
-    private void PickColorButton_Click(object sender, RoutedEventArgs e)
+    private async void SwatchButton_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not string hex)
+        {
+            return;
+        }
+
+        await SelectAndApplyColorAsync(hex);
+    }
+
+    private async void CustomSwatchButton_Click(object sender, RoutedEventArgs e)
+    {
+        await OpenColorPickerAsync();
+    }
+
+    private async void ColorPreviewButton_Click(object sender, RoutedEventArgs e)
+    {
+        await OpenColorPickerAsync();
+    }
+
+    private async Task OpenColorPickerAsync()
     {
         using var dialog = new Forms.ColorDialog
         {
@@ -209,57 +256,114 @@ public partial class MainWindow : Window
 
         if (dialog.ShowDialog() == Forms.DialogResult.OK)
         {
-            SetSelectedColor(new RgbColor(dialog.Color.R, dialog.Color.G, dialog.Color.B).ToHex());
+            var hex = new RgbColor(dialog.Color.R, dialog.Color.G, dialog.Color.B).ToHex();
+            RecordRecentCustomColor(hex);
+            SetSelectedColor(hex);
+
+            if (MainPanel.Visibility == Visibility.Visible)
+            {
+                await ApplySelectedColorAsync();
+            }
+            else
+            {
+                await PersistCurrentSettingsAsync();
+            }
         }
     }
 
-    private void SavePresetButton_Click(object sender, RoutedEventArgs e)
+    private async Task SelectAndApplyColorAsync(string hex)
     {
-        var name = string.IsNullOrWhiteSpace(PresetNameBox.Text)
-            ? $"Color {Presets.Count + 1}"
-            : PresetNameBox.Text.Trim();
+        SetSelectedColor(hex);
 
-        Presets.Add(new PresetItem(new ColorPreset(name, _selectedColor.ToHex())));
-        PresetNameBox.Text = string.Empty;
-        _ = PersistCurrentSettingsAsync();
-    }
-
-    private void UsePresetButton_Click(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is not PresetItem preset)
+        if (_suppressColorApply || MainPanel.Visibility != Visibility.Visible)
         {
             return;
         }
 
-        SetSelectedColor(preset.HexColor);
-        StatusText.Text = $"Selected preset {preset.Name}.";
+        await ApplySelectedColorAsync();
     }
 
-    private void DeletePresetButton_Click(object sender, RoutedEventArgs e)
+    private void RecordRecentCustomColor(string hex)
     {
-        if ((sender as FrameworkElement)?.DataContext is not PresetItem preset)
+        var normalized = RgbColor.FromHex(hex).ToHex();
+        _settings.RecentCustomColors.RemoveAll(color =>
+            string.Equals(color, normalized, StringComparison.OrdinalIgnoreCase));
+        _settings.RecentCustomColors.Insert(0, normalized);
+
+        if (_settings.RecentCustomColors.Count > ColorSwatches.MaxRecentCustomColors)
         {
-            return;
+            _settings.RecentCustomColors.RemoveRange(
+                ColorSwatches.MaxRecentCustomColors,
+                _settings.RecentCustomColors.Count - ColorSwatches.MaxRecentCustomColors);
         }
 
-        Presets.Remove(preset);
-        _ = PersistCurrentSettingsAsync();
+        LoadRecentCustomSwatches();
+        UpdateRecentCustomEmptyState();
     }
 
-    private void LoadPresets()
+    private void LoadRecentCustomSwatches()
     {
-        Presets.Clear();
-        foreach (var preset in _settings.Presets)
+        RecentCustomSwatches.Clear();
+        foreach (var hex in _settings.RecentCustomColors)
         {
-            Presets.Add(new PresetItem(preset));
+            RecentCustomSwatches.Add(new SwatchItem(hex));
         }
+
+        UpdateSwatchSelection();
+    }
+
+    private void UpdateRecentCustomEmptyState()
+    {
+        RecentCustomEmptyText.Visibility = RecentCustomSwatches.Count == 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void SetSelectedColor(string hexColor)
     {
         _selectedColor = RgbColor.FromHex(hexColor);
+        var wpfColor = System.Windows.Media.Color.FromRgb(_selectedColor.Red, _selectedColor.Green, _selectedColor.Blue);
+        var brush = new SolidColorBrush(wpfColor);
         ColorText.Text = _selectedColor.ToHex();
-        ColorPreview.Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(_selectedColor.Red, _selectedColor.Green, _selectedColor.Blue));
+        ColorPreview.Background = brush;
+        ColorGlowBrush.Color = wpfColor;
+        if (ColorPreview.Effect is DropShadowEffect glow)
+        {
+            glow.Color = wpfColor;
+        }
+
+        UpdateSwatchSelection();
+    }
+
+    private void UpdateSwatchSelection()
+    {
+        var selectedHex = _selectedColor.ToHex();
+        UpdateSwatchCollectionSelection(BuiltInSwatches, selectedHex);
+        UpdateSwatchCollectionSelection(RecentCustomSwatches, selectedHex);
+    }
+
+    private static void UpdateSwatchCollectionSelection(IEnumerable<SwatchItem> swatches, string selectedHex)
+    {
+        foreach (var swatch in swatches)
+        {
+            swatch.IsSelected = string.Equals(swatch.Hex, selectedHex, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private void BrightnessSlider_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Slider slider || slider.ActualWidth <= 0)
+        {
+            return;
+        }
+
+        var clickRatio = Math.Clamp(e.GetPosition(slider).X / slider.ActualWidth, 0, 1);
+        slider.Value = slider.Minimum + clickRatio * (slider.Maximum - slider.Minimum);
+    }
+
+    private void BrightnessSlider_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        ScheduleBrightnessApply();
     }
 
     private void BrightnessSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -270,6 +374,24 @@ public partial class MainWindow : Window
         }
 
         UpdateBrightnessLabel();
+        ScheduleBrightnessApply();
+    }
+
+    private void ScheduleBrightnessApply()
+    {
+        if (_suppressColorApply || MainPanel.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        _brightnessApplyTimer.Stop();
+        _brightnessApplyTimer.Start();
+    }
+
+    private async void BrightnessApplyTimer_Tick(object? sender, EventArgs e)
+    {
+        _brightnessApplyTimer.Stop();
+        await ApplySelectedColorAsync();
     }
 
     private void UpdateBrightnessLabel()
@@ -281,8 +403,6 @@ public partial class MainWindow : Window
     {
         _settings.LastColor = _selectedColor.ToHex();
         _settings.LastBrightness = (int)Math.Round(BrightnessSlider.Value);
-        _settings.SelectedDeviceIds = Devices.Where(device => device.IsSelected && device.IsEnabled).Select(device => device.Id).ToList();
-        _settings.Presets = Presets.Select(preset => preset.ToPreset()).ToList();
         await _settingsStore.SaveAsync(_settings);
     }
 
@@ -301,6 +421,7 @@ public partial class MainWindow : Window
         RefreshButton.IsEnabled = true;
         SetupText.Text = message;
         StatusText.Text = "Lighting support needs setup.";
+        SetStatusIndicator(StatusKind.Setup);
     }
 
     private void ShowMain(string message)
@@ -310,6 +431,7 @@ public partial class MainWindow : Window
         ApplyButton.IsEnabled = true;
         RefreshButton.IsEnabled = true;
         StatusText.Text = message;
+        SetStatusIndicator(StatusKind.Ready);
     }
 
     private async Task RunBusyAsync(string message, Func<Task> action)
@@ -320,7 +442,9 @@ public partial class MainWindow : Window
         }
 
         _busy = true;
+        _brightnessApplyTimer.Stop();
         StatusText.Text = message;
+        SetStatusIndicator(StatusKind.Busy);
         ApplyButton.IsEnabled = false;
         RefreshButton.IsEnabled = false;
         SetupButton.IsEnabled = false;
@@ -335,25 +459,60 @@ public partial class MainWindow : Window
             ApplyButton.IsEnabled = MainPanel.Visibility == Visibility.Visible;
             RefreshButton.IsEnabled = true;
             SetupButton.IsEnabled = true;
+            SetStatusIndicator(MainPanel.Visibility == Visibility.Visible ? StatusKind.Ready : StatusKind.Setup);
         }
+    }
+
+    private enum StatusKind
+    {
+        Ready,
+        Busy,
+        Setup
+    }
+
+    private void SetStatusIndicator(StatusKind kind)
+    {
+        var color = kind switch
+        {
+            StatusKind.Ready => System.Windows.Media.Color.FromRgb(0x3D, 0xD6, 0x8C),
+            StatusKind.Busy => System.Windows.Media.Color.FromRgb(0xF0, 0xA0, 0x30),
+            _ => System.Windows.Media.Color.FromRgb(0xF0, 0x71, 0x78)
+        };
+
+        StatusDot.Fill = new SolidColorBrush(color);
     }
 }
 
-public sealed class DeviceItem(RgbDevice device, bool isSelected) : INotifyPropertyChanged
+public sealed class DeviceItem(RgbDevice device)
 {
-    private bool _isSelected = isSelected;
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-
     public string Id => device.Id;
 
     public string Name => string.IsNullOrWhiteSpace(device.Vendor) ? device.Name : $"{device.Vendor} {device.Name}";
 
     public string Details => device.Zones.Count > 0
-        ? $"{device.LedCount} LEDs · {string.Join(", ", device.Zones.Select(zone => $"{zone.Name} ({zone.LedCount})"))} · {device.Status}"
-        : $"{device.LedCount} LEDs - {device.Status}";
+        ? $"{FormatLedCount(device.LedCount)} · {string.Join(", ", device.Zones.Select(zone => $"{zone.Name} ({zone.LedCount})"))} · {device.Status}"
+        : $"{FormatLedCount(device.LedCount)} - {device.Status}";
 
-    public bool IsEnabled => device.IsSupported;
+    private static string FormatLedCount(int count) => count == 1 ? "1 LED" : $"{count} LEDs";
+
+    public bool IsSupported => device.IsSupported;
+}
+
+public sealed class SwatchItem : INotifyPropertyChanged
+{
+    private bool _isSelected;
+
+    public SwatchItem(string hex)
+    {
+        Hex = RgbColor.FromHex(hex).ToHex();
+        Brush = CreateBrush(Hex);
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public string Hex { get; }
+
+    public System.Windows.Media.Brush Brush { get; }
 
     public bool IsSelected
     {
@@ -369,39 +528,10 @@ public sealed class DeviceItem(RgbDevice device, bool isSelected) : INotifyPrope
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
         }
     }
-}
 
-public sealed class PresetItem(ColorPreset preset) : INotifyPropertyChanged
-{
-    private string _name = preset.Name;
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-
-    public string Name
+    private static System.Windows.Media.Brush CreateBrush(string hex)
     {
-        get => _name;
-        set
-        {
-            if (_name == value)
-            {
-                return;
-            }
-
-            _name = value;
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
-        }
+        var color = RgbColor.FromHex(hex);
+        return new SolidColorBrush(System.Windows.Media.Color.FromRgb(color.Red, color.Green, color.Blue));
     }
-
-    public string HexColor { get; } = preset.HexColor;
-
-    public System.Windows.Media.Brush SwatchBrush
-    {
-        get
-        {
-            var color = RgbColor.FromHex(HexColor);
-            return new SolidColorBrush(System.Windows.Media.Color.FromRgb(color.Red, color.Green, color.Blue));
-        }
-    }
-
-    public ColorPreset ToPreset() => new(Name, HexColor);
 }

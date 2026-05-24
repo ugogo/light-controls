@@ -7,26 +7,22 @@ internal sealed class Hidpp20Session : IDisposable
     private const int ShortReportLength = 7;
     private const int LongReportLength = 20;
 
-    private readonly HidDevice _device;
-    private readonly HidStream _stream;
+    private readonly HidDevice _shortDevice;
+    private readonly HidDevice _longDevice;
+    private readonly HidStream _shortStream;
+    private readonly HidStream _longStream;
     private byte _deviceIndex;
     private readonly Dictionary<ushort, byte> _featureIndexCache = [];
 
-    public Hidpp20Session(HidDevice device, byte deviceIndex)
+    private Hidpp20Session(HidDevice shortDevice, HidDevice longDevice, byte deviceIndex)
     {
-        _device = device;
-        _stream = device.Open();
+        _shortDevice = shortDevice;
+        _longDevice = longDevice;
+        _shortStream = shortDevice.Open();
+        _longStream = longDevice.Open();
+        _shortStream.ReadTimeout = 500;
+        _longStream.ReadTimeout = 1000;
         _deviceIndex = deviceIndex;
-    }
-
-    public static IReadOnlyList<HidDevice> FindCandidateDevices()
-    {
-        return DeviceList.Local
-            .GetHidDevices(LogitechDeviceIds.VendorId)
-            .Where(IsCandidateInterface)
-            .Where(device => device.GetMaxOutputReportLength() >= LongReportLength)
-            .OrderByDescending(device => device.GetMaxOutputReportLength())
-            .ToList();
     }
 
     public static bool TryOpen(out Hidpp20Session? session, out string? error)
@@ -34,13 +30,11 @@ internal sealed class Hidpp20Session : IDisposable
         session = null;
         error = null;
 
-        foreach (var device in FindCandidateDevices())
+        foreach (var pair in FindEndpointPairs())
         {
             try
             {
-                var deviceIndex = Hidpp20Constants.DefaultMouseDeviceIndex;
-
-                var candidate = new Hidpp20Session(device, deviceIndex);
+                var candidate = new Hidpp20Session(pair.Short, pair.Long, Hidpp20Constants.DefaultMouseDeviceIndex);
                 if (candidate.ProbeProX2Mouse())
                 {
                     session = candidate;
@@ -51,7 +45,7 @@ internal sealed class Hidpp20Session : IDisposable
             }
             catch
             {
-                // Try the next HID interface.
+                // Try the next receiver or mouse interface pair.
             }
         }
 
@@ -62,7 +56,8 @@ internal sealed class Hidpp20Session : IDisposable
 
     public bool ProbeProX2Mouse()
     {
-        return TryGetFeatureIndex(Hidpp20Constants.FeatureModeStatus, out _)
+        return TryGetFeatureIndex(Hidpp20Constants.FeatureRgbEffects, out _)
+            || TryGetFeatureIndex(Hidpp20Constants.FeatureModeStatus, out _)
             || TryGetFeatureIndex(Hidpp20Constants.FeatureColorLedEffects, out _)
             || TryGetFeatureIndex(Hidpp20Constants.FeatureLedSoftwareControl, out _);
     }
@@ -74,30 +69,13 @@ internal sealed class Hidpp20Session : IDisposable
             return featureIndex != 0;
         }
 
-        foreach (var command in new[] { Hidpp20Constants.CmdRootGetFeature, Hidpp20Constants.CmdRootGetFeatureAlt })
-        {
-            var request = CreateShortReport(command);
-            request[4] = (byte)(featureId >> 8);
-            request[5] = (byte)(featureId & 0xFF);
-
-            if (TryRequest(request, out var response) && response[4] != 0)
-            {
-                featureIndex = response[4];
-                _featureIndexCache[featureId] = featureIndex;
-                return true;
-            }
-        }
-
         var savedIndex = _deviceIndex;
         foreach (var deviceIndex in new[] { savedIndex, Hidpp20Constants.ReceiverDeviceIndex })
         {
             _deviceIndex = deviceIndex;
-            foreach (var command in new[] { Hidpp20Constants.CmdRootGetFeature, Hidpp20Constants.CmdRootGetFeatureAlt })
+            foreach (var command in new[] { Hidpp20Constants.CmdRootGetFeatureAlt, Hidpp20Constants.CmdRootGetFeature })
             {
-                var request = CreateShortReport(command);
-                request[4] = (byte)(featureId >> 8);
-                request[5] = (byte)(featureId & 0xFF);
-
+                var request = CreateRootGetFeatureRequest(featureId, command);
                 if (TryRequest(request, out var response) && response[4] != 0)
                 {
                     _deviceIndex = savedIndex;
@@ -116,6 +94,13 @@ internal sealed class Hidpp20Session : IDisposable
 
     public bool TrySetPowerLedColor(byte red, byte green, byte blue, out string? error)
     {
+        if (TrySetViaRgbEffects(red, green, blue, out error))
+        {
+            return true;
+        }
+
+        TryEnsureSoftwareControl();
+
         if (TrySetViaModeStatus(red, green, blue, out error))
         {
             return true;
@@ -135,6 +120,94 @@ internal sealed class Hidpp20Session : IDisposable
         return false;
     }
 
+    private bool TrySetViaRgbEffects(byte red, byte green, byte blue, out string? error)
+    {
+        error = null;
+        if (!TryGetFeatureIndex(Hidpp20Constants.FeatureRgbEffects, out var featureIndex))
+        {
+            error = "RGB_EFFECTS (0x8071) is not available.";
+            return false;
+        }
+
+        TryEnableRgbSoftwareControl(featureIndex);
+
+        const byte clusterIndex = 0;
+        var effectIndex = TryFindSolidColorEffectIndex(featureIndex, clusterIndex) ?? 0;
+
+        var report = CreateLongReport(Hidpp20Constants.CmdRgbEffectsSetClusterEffect);
+        report[2] = featureIndex;
+        report[4] = clusterIndex;
+        report[5] = effectIndex;
+        report[6] = red;
+        report[7] = green;
+        report[8] = blue;
+        report[16] = 0x01;
+
+        if (TryRequest(report, out _))
+        {
+            return true;
+        }
+
+        error = "RGB_EFFECTS color command was rejected by the mouse.";
+        return false;
+    }
+
+    private void TryEnableRgbSoftwareControl(byte featureIndex)
+    {
+        var report = CreateLongReport(Hidpp20Constants.CmdRgbEffectsManageSwControl);
+        report[2] = featureIndex;
+        report[4] = 0x01;
+        report[5] = 0x03;
+        report[6] = 0x05;
+        TryRequest(report, out _);
+    }
+
+    private byte? TryFindSolidColorEffectIndex(byte featureIndex, byte clusterIndex)
+    {
+        var clusterInfo = CreateLongReport(Hidpp20Constants.CmdRgbEffectsGetInfo);
+        clusterInfo[2] = featureIndex;
+        clusterInfo[4] = clusterIndex;
+        clusterInfo[5] = 0xFF;
+        if (!TryRequest(clusterInfo, out var clusterResponse))
+        {
+            return null;
+        }
+
+        var effectCount = clusterResponse[8];
+        for (byte effectIndex = 0; effectIndex < effectCount; effectIndex++)
+        {
+            var effectInfo = CreateLongReport(Hidpp20Constants.CmdRgbEffectsGetInfo);
+            effectInfo[2] = featureIndex;
+            effectInfo[4] = clusterIndex;
+            effectInfo[5] = effectIndex;
+            if (!TryRequest(effectInfo, out var effectResponse))
+            {
+                continue;
+            }
+
+            var mode = (ushort)((effectResponse[6] << 8) | effectResponse[7]);
+            if (mode == Hidpp20Constants.RgbEffectModeOn)
+            {
+                return effectIndex;
+            }
+        }
+
+        return effectCount > 0 ? (byte)0 : null;
+    }
+
+    private void TryEnsureSoftwareControl()
+    {
+        if (!TryGetFeatureIndex(Hidpp20Constants.FeatureOnboardProfiles, out var featureIndex))
+        {
+            return;
+        }
+
+        var report = CreateLongReport(Hidpp20Constants.CmdOnboardProfilesSetMode);
+        report[2] = featureIndex;
+        report[5] = Hidpp20Constants.OnboardProfilesDisable;
+        TryRequest(report, out _);
+    }
+
     private bool TrySetViaModeStatus(byte red, byte green, byte blue, out string? error)
     {
         error = null;
@@ -146,7 +219,6 @@ internal sealed class Hidpp20Session : IDisposable
 
         var report = CreateLongReport(Hidpp20Constants.CmdModeStatusSetSolidColor);
         report[2] = featureIndex;
-        report[4] = 0x00;
         report[5] = 0x01;
         report[6] = red;
         report[7] = green;
@@ -155,6 +227,30 @@ internal sealed class Hidpp20Session : IDisposable
         if (TryRequest(report, out _))
         {
             return true;
+        }
+
+        ReadOnlySpan<byte[]> parameterSets =
+        [
+            [0x00, 0x01, red, green, blue],
+            [0x00, 0x00, red, green, blue]
+        ];
+
+        foreach (var command in new[] { Hidpp20Constants.CmdModeStatusSetSolidColor, (byte)0x50, (byte)0x70 })
+        {
+            foreach (var parameters in parameterSets)
+            {
+                report = CreateLongReport(command);
+                report[2] = featureIndex;
+                for (var i = 0; i < parameters.Length && 5 + i < report.Length; i++)
+                {
+                    report[5 + i] = parameters[i];
+                }
+
+                if (TryRequest(report, out _))
+                {
+                    return true;
+                }
+            }
         }
 
         error = "MODE STATUS color command was rejected by the mouse.";
@@ -208,9 +304,6 @@ internal sealed class Hidpp20Session : IDisposable
         report[4] = 0x00;
         report[5] = 0x00;
         report[6] = 0x01;
-        report[7] = red;
-        report[8] = green;
-        report[9] = blue;
 
         if (TryRequest(report, out _))
         {
@@ -221,13 +314,24 @@ internal sealed class Hidpp20Session : IDisposable
         return false;
     }
 
-    private byte[] CreateShortReport(byte command) =>
-    [
-        Hidpp20Constants.ReportIdShort,
-        _deviceIndex,
-        0x00,
-        command
-    ];
+    private byte[] CreateRootGetFeatureRequest(ushort featureId, byte command)
+    {
+        var report = CreateShortReport(command);
+        report[4] = (byte)(featureId >> 8);
+        report[5] = (byte)(featureId & 0xFF);
+        report[6] = 0x00;
+        return report;
+    }
+
+    private byte[] CreateShortReport(byte command)
+    {
+        var report = new byte[ShortReportLength];
+        report[0] = Hidpp20Constants.ReportIdShort;
+        report[1] = _deviceIndex;
+        report[2] = 0x00;
+        report[3] = command;
+        return report;
+    }
 
     private byte[] CreateLongReport(byte command)
     {
@@ -240,45 +344,122 @@ internal sealed class Hidpp20Session : IDisposable
 
     private bool TryRequest(byte[] request, out byte[] response)
     {
-        response = new byte[_device.GetMaxInputReportLength()];
+        response = new byte[LongReportLength];
 
-        var writeBuffer = PadReport(request);
-        _stream.Write(writeBuffer);
+        var isShort = request[0] == Hidpp20Constants.ReportIdShort;
+        var writeStream = isShort ? _shortStream : _longStream;
+        writeStream.Write(PadReport(request));
 
-        var readBuffer = new byte[response.Length];
-        for (var attempt = 0; attempt < 5; attempt++)
+        foreach (var readStream in new[] { _longStream, _shortStream })
         {
-            var read = _stream.Read(readBuffer, 0, readBuffer.Length);
-            if (read > 0)
-            {
-                Array.Copy(readBuffer, response, Math.Min(readBuffer.Length, response.Length));
-                return response[0] == request[0] + 1 || response[0] == Hidpp20Constants.ReportIdLong;
-            }
+            var readLength = readStream == _shortStream ? ShortReportLength : LongReportLength;
+            var readBuffer = new byte[readLength];
 
-            Thread.Sleep(5);
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    var read = readStream.Read(readBuffer, 0, readBuffer.Length);
+                    if (read <= 0)
+                    {
+                        Thread.Sleep(5);
+                        continue;
+                    }
+
+                    Array.Copy(readBuffer, response, Math.Min(readBuffer.Length, response.Length));
+                    if (IsSuccessfulResponse(request, response))
+                    {
+                        return true;
+                    }
+                }
+                catch (TimeoutException)
+                {
+                    break;
+                }
+            }
         }
 
         return false;
     }
 
-    private byte[] PadReport(byte[] report)
+    private static bool IsSuccessfulResponse(byte[] request, byte[] response)
     {
-        var reportLength = Math.Max(_device.GetMaxOutputReportLength(), report.Length);
-        if (report.Length >= reportLength)
+        if (response[0] != request[0] + 1 && response[0] != Hidpp20Constants.ReportIdLong)
+        {
+            return false;
+        }
+
+        if (response.Length > 3 && response[3] == 0x8F)
+        {
+            return false;
+        }
+
+        if (request.Length > 3
+            && response.Length > 3
+            && request[2] != 0
+            && (response[2] != request[2] || response[3] != request[3]))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static byte[] PadReport(byte[] report)
+    {
+        var reportLength = report[0] switch
+        {
+            Hidpp20Constants.ReportIdShort => ShortReportLength,
+            Hidpp20Constants.ReportIdLong => LongReportLength,
+            _ => report.Length
+        };
+
+        if (report.Length == reportLength)
         {
             return report;
         }
 
         var padded = new byte[reportLength];
-        Array.Copy(report, padded, report.Length);
+        Array.Copy(report, padded, Math.Min(report.Length, reportLength));
         return padded;
+    }
+
+    internal static IReadOnlyList<HidppEndpointPair> FindEndpointPairs()
+    {
+        var devices = DeviceList.Local
+            .GetHidDevices(LogitechDeviceIds.VendorId)
+            .Where(IsCandidateInterface)
+            .ToList();
+
+        var pairs = new List<HidppEndpointPair>();
+        foreach (var group in devices.GroupBy(GetEndpointGroupKey))
+        {
+            var shortDevice = group.FirstOrDefault(device => device.GetMaxOutputReportLength() == ShortReportLength);
+            var longDevice = group.FirstOrDefault(device => device.GetMaxOutputReportLength() == LongReportLength);
+            if (shortDevice is not null && longDevice is not null)
+            {
+                pairs.Add(new HidppEndpointPair(shortDevice, longDevice));
+            }
+        }
+
+        return pairs;
+    }
+
+    private static string GetEndpointGroupKey(HidDevice device)
+    {
+        var path = device.DevicePath;
+        var collectionIndex = path.IndexOf("&col", StringComparison.OrdinalIgnoreCase);
+        return collectionIndex > 0 ? path[..collectionIndex] : path;
     }
 
     private static bool IsCandidateInterface(HidDevice device)
     {
-        if (device.ProductID == LogitechDeviceIds.ProX2MouseProductId)
+        foreach (var mouseId in LogitechDeviceIds.DirectMouseProductIds)
         {
-            return true;
+            if (device.ProductID == mouseId)
+            {
+                return true;
+            }
         }
 
         foreach (var receiverId in LogitechDeviceIds.LightspeedReceiverProductIds)
@@ -294,6 +475,9 @@ internal sealed class Hidpp20Session : IDisposable
 
     public void Dispose()
     {
-        _stream.Dispose();
+        _shortStream.Dispose();
+        _longStream.Dispose();
     }
 }
+
+internal readonly record struct HidppEndpointPair(HidDevice Short, HidDevice Long);

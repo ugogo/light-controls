@@ -38,7 +38,7 @@ public sealed class LogitechDirectBackend(LightControlsSettings settings) : IRgb
                     -1,
                     LogitechDeviceIds.ProX2Superlight2Name,
                     "Logitech",
-                    "Power LED (direct HID++)",
+                    "RGB (direct HID++)",
                     string.Empty,
                     "HID",
                     1,

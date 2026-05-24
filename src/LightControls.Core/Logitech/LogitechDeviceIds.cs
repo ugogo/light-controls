@@ -16,10 +16,15 @@ internal static class LogitechDeviceIds
         0xC53F
     ];
 
-    /// <summary>PRO X 2 mouse (wired USB).</summary>
+    /// <summary>G PRO 2 LIGHTSPEED mouse (wired USB).</summary>
+    public const ushort ProG2MouseProductId = 0xC09A;
+
+    /// <summary>PRO X 2 / Superlight 2 mouse (wired USB).</summary>
     public const ushort ProX2MouseProductId = 0xC09B;
+
+    public static readonly ushort[] DirectMouseProductIds = [ProG2MouseProductId, ProX2MouseProductId];
 
     public const string ProX2Superlight2DeviceId = "logitech:pro-x2-superlight-2";
 
-    public const string ProX2Superlight2Name = "Logitech G Pro X Superlight 2";
+    public const string ProX2Superlight2Name = "G Pro 2 LIGHTSPEED";
 }

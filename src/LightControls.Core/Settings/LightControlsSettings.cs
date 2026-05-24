@@ -22,10 +22,6 @@ public sealed class LightControlsSettings
 
     public List<string> SelectedDeviceIds { get; set; } = [];
 
-    public List<ColorPreset> Presets { get; set; } =
-    [
-        new("White", "#FFFFFF"),
-        new("Blue", "#00A8FF"),
-        new("Red", "#FF3B30")
-    ];
+    /// <summary>Recently picked custom colors, most recent first.</summary>
+    public List<string> RecentCustomColors { get; set; } = [];
 }

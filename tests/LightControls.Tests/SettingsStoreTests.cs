@@ -14,7 +14,7 @@ public sealed class SettingsStoreTests
 
         Assert.Equal("127.0.0.1", settings.Host);
         Assert.Equal(6742, settings.Port);
-        Assert.NotEmpty(settings.Presets);
+        Assert.Empty(settings.RecentCustomColors);
     }
 
     [Fact]
