@@ -2,8 +2,9 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $publishDir = Join-Path $repoRoot "dist\LightControls"
+. (Join-Path $PSScriptRoot "Stop-AppInstances.ps1")
 
-Get-Process LightControls.Desktop -ErrorAction SilentlyContinue | Stop-Process -Force
+Stop-LightControlsApp
 
 if (Test-Path -LiteralPath $publishDir) {
     for ($attempt = 1; $attempt -le 5; $attempt++) {
