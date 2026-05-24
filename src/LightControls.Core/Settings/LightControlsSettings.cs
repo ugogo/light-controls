@@ -15,6 +15,11 @@ public sealed class LightControlsSettings
     /// </summary>
     public bool EnableLogitechDirect { get; set; } = true;
 
+    /// <summary>
+    /// When true, detects and controls Robobloq DX Light monitor bar via direct USB HID (no OpenRGB).
+    /// </summary>
+    public bool EnableDxLightDirect { get; set; } = true;
+
     public string LastColor { get; set; } = "#00A8FF";
 
     /// <summary>Brightness level applied to devices, 0–100.</summary>

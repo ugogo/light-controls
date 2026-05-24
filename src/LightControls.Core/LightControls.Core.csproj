@@ -10,4 +10,8 @@
     <PackageReference Include="HidSharp" Version="2.6.4" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\dx-light\Windows\DXLight.Core\DXLight.Core.csproj" />
+  </ItemGroup>
+
 </Project>

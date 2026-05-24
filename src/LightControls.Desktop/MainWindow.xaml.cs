@@ -8,6 +8,7 @@ using System.Windows.Media.Effects;
 using System.Windows.Threading;
 using LightControls.Core;
 using LightControls.Core.Abstractions;
+using LightControls.Core.DxLight;
 using LightControls.Core.Logitech;
 using LightControls.Core.Models;
 using LightControls.Core.OpenRgb;
@@ -54,7 +55,10 @@ public partial class MainWindow : Window
         _suppressColorApply = true;
         _settings = await _settingsStore.LoadAsync();
         var openRgbBackend = new OpenRgbBackend(_settings);
-        _backend = new CompositeRgbBackend(openRgbBackend, new LogitechDirectBackend(_settings));
+        _backend = new CompositeRgbBackend(
+            openRgbBackend,
+            new LogitechDirectBackend(_settings),
+            new DxLightDirectBackend(_settings));
         _setupManager = new OpenRgbSetupManager(_settings, openRgbBackend);
 
         LoadRecentCustomSwatches();
