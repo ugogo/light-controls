@@ -14,6 +14,7 @@ internal sealed class Hidpp20Session : IDisposable
     private readonly object _ioLock = new();
     private byte _deviceIndex;
     private readonly Dictionary<ushort, byte> _featureIndexCache = [];
+    private readonly Dictionary<byte, byte> _solidEffectIndexCache = [];
 
     private Hidpp20Session(HidDevice shortDevice, HidDevice longDevice, byte deviceIndex)
     {
@@ -123,15 +124,74 @@ internal sealed class Hidpp20Session : IDisposable
 
     public bool TryMaintainPowerLedColor(byte red, byte green, byte blue)
     {
+        DrainPendingNotifications();
         if (!TryGetFeatureIndex(Hidpp20Constants.FeatureRgbEffects, out var featureIndex))
         {
             return TrySetPowerLedColor(red, green, blue, out _);
         }
 
-        TryEnsureSoftwareControl();
-        TryEnableRgbSoftwareControl(featureIndex);
-        TryDisableRgbPowerSave(featureIndex);
-        return TrySetRgbEffectsColor(featureIndex, red, green, blue, out _);
+        return TryReclaimRgbActiveControl(featureIndex, red, green, blue);
+    }
+
+    public int DrainPendingNotifications(int maxReads = 8)
+    {
+        var drained = 0;
+        for (var i = 0; i < maxReads; i++)
+        {
+            if (!TryWaitForNotification(1, out _))
+            {
+                break;
+            }
+
+            drained++;
+        }
+
+        return drained;
+    }
+
+    public bool TryHandleRgbNotifications(byte red, byte green, byte blue, int maxReads = 12)
+    {
+        if (!TryGetFeatureIndex(Hidpp20Constants.FeatureRgbEffects, out var featureIndex))
+        {
+            return false;
+        }
+
+        var handled = false;
+        for (var i = 0; i < maxReads; i++)
+        {
+            if (!TryWaitForNotification(250, out var report))
+            {
+                break;
+            }
+
+            if (!IsRgbEffectsNotification(report, featureIndex) && !IsAsyncNotification(report))
+            {
+                continue;
+            }
+
+            handled = true;
+        }
+
+        if (handled)
+        {
+            return TryReclaimRgbActiveControl(featureIndex, red, green, blue);
+        }
+
+        return false;
+    }
+
+    public string? TryReadRgbPowerSave(byte featureIndex)
+    {
+        var read = CreateLongReport(Hidpp20Constants.CmdRgbEffectsSetPowerSave);
+        read[2] = featureIndex;
+        if (!TryRequest(read, out var response))
+        {
+            return null;
+        }
+
+        var lowPower = (ushort)((response[8] << 8) | response[9]);
+        var turnOff = (ushort)((response[10] << 8) | response[11]);
+        return $"lowPower={lowPower}s turnOff={turnOff}s";
     }
 
     public void TryReleaseRgbSoftwareControl()
@@ -194,16 +254,48 @@ internal sealed class Hidpp20Session : IDisposable
             return false;
         }
 
+        TryEnsureSoftwareControl();
+        return TryReclaimRgbActiveControl(featureIndex, red, green, blue, out error);
+    }
+
+    private bool TryReclaimRgbActiveControl(byte featureIndex, byte red, byte green, byte blue, out string? error)
+    {
+        error = null;
+        TryEnsureSoftwareControl();
         TryEnableRgbSoftwareControl(featureIndex);
         TryDisableRgbPowerSave(featureIndex);
-        return TrySetRgbEffectsColor(featureIndex, red, green, blue, out error);
+        TrySetMaxBrightness();
+        if (TrySetRgbEffectsColor(featureIndex, red, green, blue, out error))
+        {
+            return true;
+        }
+
+        error ??= "RGB_EFFECTS color command was rejected by the mouse.";
+        return false;
+    }
+
+    private bool TryReclaimRgbActiveControl(byte featureIndex, byte red, byte green, byte blue) =>
+        TryReclaimRgbActiveControl(featureIndex, red, green, blue, out _);
+
+    private void TrySetMaxBrightness()
+    {
+        if (!TryGetFeatureIndex(Hidpp20Constants.FeatureBrightnessControl, out var featureIndex))
+        {
+            return;
+        }
+
+        var report = CreateLongReport(Hidpp20Constants.CmdBrightnessControlSetBrightness);
+        report[2] = featureIndex;
+        report[4] = 0x01;
+        report[5] = 100;
+        TryRequest(report, out _);
     }
 
     private bool TrySetRgbEffectsColor(byte featureIndex, byte red, byte green, byte blue, out string? error)
     {
         error = null;
         const byte clusterIndex = 0;
-        var effectIndex = TryFindSolidColorEffectIndex(featureIndex, clusterIndex) ?? 0;
+        var effectIndex = GetSolidColorEffectIndex(featureIndex, clusterIndex);
 
         var report = CreateLongReport(Hidpp20Constants.CmdRgbEffectsSetClusterEffect);
         report[2] = featureIndex;
@@ -223,6 +315,18 @@ internal sealed class Hidpp20Session : IDisposable
         return false;
     }
 
+    private byte GetSolidColorEffectIndex(byte featureIndex, byte clusterIndex)
+    {
+        if (_solidEffectIndexCache.TryGetValue(clusterIndex, out var cached))
+        {
+            return cached;
+        }
+
+        var effectIndex = TryFindSolidColorEffectIndex(featureIndex, clusterIndex) ?? 0;
+        _solidEffectIndexCache[clusterIndex] = effectIndex;
+        return effectIndex;
+    }
+
     private void TryEnableRgbSoftwareControl(byte featureIndex)
     {
         var report = CreateLongReport(Hidpp20Constants.CmdRgbEffectsManageSwControl);
@@ -235,6 +339,10 @@ internal sealed class Hidpp20Session : IDisposable
 
     private void TryDisableRgbPowerSave(byte featureIndex)
     {
+        var read = CreateLongReport(Hidpp20Constants.CmdRgbEffectsSetPowerSave);
+        read[2] = featureIndex;
+        TryRequest(read, out _);
+
         var report = CreateLongReport(Hidpp20Constants.CmdRgbEffectsSetPowerSave);
         report[2] = featureIndex;
         report[4] = 0x01;
@@ -453,6 +561,11 @@ internal sealed class Hidpp20Session : IDisposable
                         }
 
                         Array.Copy(readBuffer, response, Math.Min(readBuffer.Length, response.Length));
+                        if (IsAsyncNotification(readBuffer))
+                        {
+                            continue;
+                        }
+
                         if (IsSuccessfulResponse(request, response))
                         {
                             return true;
@@ -469,7 +582,10 @@ internal sealed class Hidpp20Session : IDisposable
         return false;
     }
 
-    private static bool IsAsyncNotification(byte[] report)
+    private static bool IsAsyncNotification(byte[] report) =>
+        IsRgbEffectsNotification(report, featureIndex: null);
+
+    private static bool IsRgbEffectsNotification(byte[] report, byte? featureIndex)
     {
         if (report.Length == 0)
         {
@@ -482,6 +598,11 @@ internal sealed class Hidpp20Session : IDisposable
         }
 
         if (report[0] != Hidpp20Constants.ReportIdLong)
+        {
+            return false;
+        }
+
+        if (featureIndex is not null && report[2] != featureIndex.Value)
         {
             return false;
         }

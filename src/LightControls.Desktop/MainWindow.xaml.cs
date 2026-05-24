@@ -220,10 +220,37 @@ public partial class MainWindow : Window
 
             SelectInitialDevice(previousSelectionId);
             UpdateDevicesPresentation();
+            await ResumeSavedLightingAsync();
         }
         catch (Exception ex)
         {
             ShowSetup($"OpenRGB is installed, but the SDK server is not reachable. {ex.Message}");
+        }
+    }
+
+    private async Task ResumeSavedLightingAsync()
+    {
+        if (_backend is null)
+        {
+            return;
+        }
+
+        var applies = Devices
+            .Where(device => device.IsSupported)
+            .Select(device => device.ToApplyRequest())
+            .ToList();
+        if (applies.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await _backend.ApplyColorAsync(applies);
+        }
+        catch
+        {
+            // Keep the UI responsive if a backend is temporarily unavailable.
         }
     }
 

@@ -8,8 +8,9 @@ namespace LightControls.Core.Logitech;
 /// </summary>
 internal sealed class LogitechMouseLightingHost : IDisposable
 {
-    private static readonly TimeSpan MaintainInterval = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan MaintainInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ListenInterval = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(3);
 
     private readonly object _stateLock = new();
     private readonly AutoResetEvent _applyRequested = new(false);
@@ -150,12 +151,7 @@ internal sealed class LogitechMouseLightingHost : IDisposable
                 }
             }
 
-            var elapsed = DateTime.UtcNow - _lastMaintainUtc;
-            var waitMs = elapsed >= MaintainInterval
-                ? 0
-                : (int)Math.Clamp((MaintainInterval - elapsed).TotalMilliseconds, 100, 500);
-
-            if (_applyRequested.WaitOne(waitMs))
+            if (_applyRequested.WaitOne((int)ListenInterval.TotalMilliseconds))
             {
                 continue;
             }
@@ -165,9 +161,9 @@ internal sealed class LogitechMouseLightingHost : IDisposable
                 return;
             }
 
-            if (elapsed >= MaintainInterval || _session.TryWaitForNotification(0, out _))
+            if (ListenForNotifications(apply) || DateTime.UtcNow - _lastMaintainUtc >= MaintainInterval)
             {
-                if (ApplyToSession(apply, initial: false).Succeeded)
+                if (MaintainColor(apply))
                 {
                     _lastMaintainUtc = DateTime.UtcNow;
                 }
@@ -198,10 +194,9 @@ internal sealed class LogitechMouseLightingHost : IDisposable
             return;
         }
 
-        if (DateTime.UtcNow - _lastMaintainUtc >= MaintainInterval
-            || _session.TryWaitForNotification(0, out _))
+        if (ListenForNotifications(apply) || DateTime.UtcNow - _lastMaintainUtc >= MaintainInterval)
         {
-            if (ApplyToSession(apply, initial: false).Succeeded)
+            if (MaintainColor(apply))
             {
                 _lastMaintainUtc = DateTime.UtcNow;
             }
@@ -210,6 +205,44 @@ internal sealed class LogitechMouseLightingHost : IDisposable
                 ResetSession();
             }
         }
+    }
+
+    private bool ListenForNotifications(DeviceColorApply apply)
+    {
+        Hidpp20Session? session;
+        lock (_stateLock)
+        {
+            session = _session;
+        }
+
+        if (session is null)
+        {
+            return false;
+        }
+
+        var adjusted = apply.Color.WithBrightness(apply.BrightnessPercent);
+        return session.TryHandleRgbNotifications(
+            adjusted.Red,
+            adjusted.Green,
+            adjusted.Blue,
+            maxReads: 1);
+    }
+
+    private bool MaintainColor(DeviceColorApply apply)
+    {
+        Hidpp20Session? session;
+        lock (_stateLock)
+        {
+            session = _session;
+        }
+
+        if (session is null)
+        {
+            return false;
+        }
+
+        var adjusted = apply.Color.WithBrightness(apply.BrightnessPercent);
+        return session.TryMaintainPowerLedColor(adjusted.Red, adjusted.Green, adjusted.Blue);
     }
 
     private bool EnsureSession()
@@ -262,7 +295,7 @@ internal sealed class LogitechMouseLightingHost : IDisposable
             return (false, error ?? "Failed");
         }
 
-        if (session.TryMaintainPowerLedColor(adjusted.Red, adjusted.Green, adjusted.Blue))
+        if (MaintainColor(apply))
         {
             return (true, null);
         }

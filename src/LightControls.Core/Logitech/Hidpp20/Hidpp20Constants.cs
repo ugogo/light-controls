@@ -12,6 +12,7 @@ internal static class Hidpp20Constants
     public const byte RgbSwControlCluster = 0x01;
     public const byte RgbSwControlMode = 0x03;
     public const byte RgbSwControlActiveFlags = 0x05;
+    public const byte RgbSwControlIdleFlags = 0x03;
     public const byte RgbSwControlReleaseFlags = 0x00;
 
     public const ushort FeatureRoot = 0x0000;
@@ -30,6 +31,8 @@ internal static class Hidpp20Constants
     public const byte CmdLedSwControlSetLedState = 0x50;
     public const byte CmdModeStatusSetSolidColor = 0x30;
     public const byte CmdOnboardProfilesSetMode = 0x10;
+
+    public const byte CmdBrightnessControlSetBrightness = 0x10;
 
     public const byte CmdRgbEffectsGetInfo = 0x00;
     public const byte CmdRgbEffectsSetClusterEffect = 0x10;

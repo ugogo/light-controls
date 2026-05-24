@@ -20,6 +20,11 @@ public static class LogitechProbe
             lines.Add($"8071: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureRgbEffects, out var rgbEffects)} -> {rgbEffects}");
             lines.Add($"8040: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureBrightnessControl, out var brightness)} -> {brightness}");
 
+            if (session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureRgbEffects, out var rgbFeatureIndex))
+            {
+                lines.Add("Power save (before): " + (session.TryReadRgbPowerSave(rgbFeatureIndex) ?? "unavailable"));
+            }
+
             foreach (var (label, red, green, blue) in new[]
                      {
                          ("RED", (byte)255, (byte)0, (byte)0),
@@ -30,6 +35,12 @@ public static class LogitechProbe
                 var ok = session.TrySetPowerLedColor(red, green, blue, out var setError);
                 lines.Add($"SET {label}: {ok}" + (setError is null ? string.Empty : $" ({setError})"));
             }
+
+            if (session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureRgbEffects, out rgbFeatureIndex))
+            {
+                lines.Add("Power save (after): " + (session.TryReadRgbPowerSave(rgbFeatureIndex) ?? "unavailable"));
+            }
+
             return string.Join(Environment.NewLine, lines);
         }
     }
