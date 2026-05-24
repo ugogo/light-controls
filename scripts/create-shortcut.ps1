@@ -8,27 +8,18 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $DesktopProject = Join-Path $Root "src\LightControls.Desktop\LightControls.Desktop.csproj"
-$StandaloneExe = Join-Path $Root "dist\LightControls\LightControls.Desktop.exe"
-$ReleaseExe = Join-Path $Root "src\LightControls.Desktop\bin\Release\net10.0-windows\LightControls.Desktop.exe"
-$DebugExe = Join-Path $Root "src\LightControls.Desktop\bin\Debug\net10.0-windows\LightControls.Desktop.exe"
+. (Join-Path $PSScriptRoot "Get-AppExe.ps1")
 
-function Get-AppExe {
-    if (Test-Path $ReleaseExe) { return $ReleaseExe }
-    if (Test-Path $DebugExe) { return $DebugExe }
-    if (Test-Path $StandaloneExe) { return $StandaloneExe }
-    return $null
-}
-
-$exe = Get-AppExe
+$exe = Get-AppExe -Root $Root
 if (-not $exe -and $BuildIfMissing) {
-    Write-Host "Building Light Controls (Release)..."
+    Write-Host "Building Light Controls..."
     Push-Location $Root
     try {
-        dotnet build $DesktopProject -c Release --nologo -v q
+        dotnet build $DesktopProject --nologo -v q
     } finally {
         Pop-Location
     }
-    $exe = Get-AppExe
+    $exe = Get-AppExe -Root $Root
 }
 
 if (-not $exe) {
