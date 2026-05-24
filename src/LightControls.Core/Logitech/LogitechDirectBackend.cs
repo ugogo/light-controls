@@ -21,7 +21,7 @@ public sealed class LogitechDirectBackend(LightControlsSettings settings) : IRgb
             return Task.FromResult(true);
         }
 
-        return Task.Run(() => Hidpp20Session.TryOpen(out _, out _), cancellationToken);
+        return Task.Run(() => Hidpp20Session.IsDevicePresent(), cancellationToken);
     }
 
     public Task<IReadOnlyList<RgbDevice>> GetDevicesAsync(CancellationToken cancellationToken = default)
@@ -37,14 +37,8 @@ public sealed class LogitechDirectBackend(LightControlsSettings settings) : IRgb
         }
 
         return Task.Run<IReadOnlyList<RgbDevice>>(() =>
-        {
-            if (!Hidpp20Session.TryOpen(out _, out _))
-            {
-                return [];
-            }
-
-            return [CreateDevice()];
-        }, cancellationToken);
+            Hidpp20Session.IsDevicePresent() ? [CreateDevice()] : [],
+            cancellationToken);
     }
 
     public Task<ApplyColorResult> ApplyColorAsync(

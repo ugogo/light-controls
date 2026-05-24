@@ -15,6 +15,7 @@ internal sealed class Hidpp20Session : IDisposable
     private byte _deviceIndex;
     private readonly Dictionary<ushort, byte> _featureIndexCache = [];
     private readonly Dictionary<byte, byte> _solidEffectIndexCache = [];
+    private bool _rgbSetupComplete;
 
     private Hidpp20Session(HidDevice shortDevice, HidDevice longDevice, byte deviceIndex)
     {
@@ -25,6 +26,30 @@ internal sealed class Hidpp20Session : IDisposable
         _shortStream.ReadTimeout = 500;
         _longStream.ReadTimeout = 1000;
         _deviceIndex = deviceIndex;
+    }
+
+    public static bool IsDevicePresent()
+    {
+        foreach (var pair in FindEndpointPairs())
+        {
+            try
+            {
+                using var candidate = new Hidpp20Session(
+                    pair.Short,
+                    pair.Long,
+                    Hidpp20Constants.DefaultMouseDeviceIndex);
+                if (candidate.ProbeProX2Mouse())
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                // Try the next receiver or mouse interface pair.
+            }
+        }
+
+        return false;
     }
 
     public static bool TryOpen(out Hidpp20Session? session, out string? error)
@@ -130,7 +155,12 @@ internal sealed class Hidpp20Session : IDisposable
             return TrySetPowerLedColor(red, green, blue, out _);
         }
 
-        return TryReclaimRgbActiveControl(featureIndex, red, green, blue);
+        if (TrySetRgbEffectsColor(featureIndex, red, green, blue, out _))
+        {
+            return true;
+        }
+
+        return TryReclaimRgbControl(featureIndex, red, green, blue, out _);
     }
 
     public int DrainPendingNotifications(int maxReads = 8)
@@ -174,7 +204,7 @@ internal sealed class Hidpp20Session : IDisposable
 
         if (handled)
         {
-            return TryReclaimRgbActiveControl(featureIndex, red, green, blue);
+            return TryReclaimRgbControl(featureIndex, red, green, blue, out _);
         }
 
         return false;
@@ -254,17 +284,14 @@ internal sealed class Hidpp20Session : IDisposable
             return false;
         }
 
-        TryEnsureSoftwareControl();
-        return TryReclaimRgbActiveControl(featureIndex, red, green, blue, out error);
+        return TryReclaimRgbControl(featureIndex, red, green, blue, out error);
     }
 
-    private bool TryReclaimRgbActiveControl(byte featureIndex, byte red, byte green, byte blue, out string? error)
+    private bool TryReclaimRgbControl(byte featureIndex, byte red, byte green, byte blue, out string? error)
     {
         error = null;
-        TryEnsureSoftwareControl();
+        EnsureRgbSetup(featureIndex);
         TryEnableRgbSoftwareControl(featureIndex);
-        TryDisableRgbPowerSave(featureIndex);
-        TrySetMaxBrightness();
         if (TrySetRgbEffectsColor(featureIndex, red, green, blue, out error))
         {
             return true;
@@ -274,8 +301,19 @@ internal sealed class Hidpp20Session : IDisposable
         return false;
     }
 
-    private bool TryReclaimRgbActiveControl(byte featureIndex, byte red, byte green, byte blue) =>
-        TryReclaimRgbActiveControl(featureIndex, red, green, blue, out _);
+    private void EnsureRgbSetup(byte featureIndex)
+    {
+        if (_rgbSetupComplete)
+        {
+            return;
+        }
+
+        TryEnsureSoftwareControl();
+        TryEnableRgbSoftwareControl(featureIndex);
+        TryDisableRgbPowerSave(featureIndex);
+        TrySetMaxBrightness();
+        _rgbSetupComplete = true;
+    }
 
     private void TrySetMaxBrightness()
     {

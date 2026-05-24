@@ -10,7 +10,8 @@ internal sealed class LogitechMouseLightingHost : IDisposable
 {
     private static readonly TimeSpan MaintainInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan ListenInterval = TimeSpan.FromMilliseconds(500);
-    private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan ReconnectDelay = TimeSpan.FromSeconds(1);
+    private const int MaintainRetryCount = 3;
 
     private readonly object _stateLock = new();
     private readonly AutoResetEvent _applyRequested = new(false);
@@ -242,7 +243,20 @@ internal sealed class LogitechMouseLightingHost : IDisposable
         }
 
         var adjusted = apply.Color.WithBrightness(apply.BrightnessPercent);
-        return session.TryMaintainPowerLedColor(adjusted.Red, adjusted.Green, adjusted.Blue);
+        for (var attempt = 0; attempt < MaintainRetryCount; attempt++)
+        {
+            if (session.TryMaintainPowerLedColor(adjusted.Red, adjusted.Green, adjusted.Blue))
+            {
+                return true;
+            }
+
+            if (attempt < MaintainRetryCount - 1)
+            {
+                Thread.Sleep(50);
+            }
+        }
+
+        return false;
     }
 
     private bool EnsureSession()
