@@ -4,7 +4,7 @@ public static class LogitechProbe
 {
     public static string Run()
     {
-        if (!Hidpp20.Hidpp20Session.TryOpen(out var session, out var error))
+        if (!Hidpp20.Hidpp20Session.TryOpen(out var session, out var error) || session is null)
         {
             return "OPEN FAILED: " + error;
         }

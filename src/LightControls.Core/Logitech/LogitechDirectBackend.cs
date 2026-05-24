@@ -61,7 +61,7 @@ public sealed class LogitechDirectBackend(LightControlsSettings settings) : IRgb
 
         return Task.Run(() =>
         {
-            if (!Hidpp20Session.TryOpen(out var session, out var openError))
+            if (!Hidpp20Session.TryOpen(out var session, out var openError) || session is null)
             {
                 return new ApplyColorResult(
                 [
@@ -73,7 +73,7 @@ public sealed class LogitechDirectBackend(LightControlsSettings settings) : IRgb
                 ]);
             }
 
-            using (session!)
+            using (session)
             {
                 var adjusted = apply.Color.WithBrightness(apply.BrightnessPercent);
                 var succeeded = session.TrySetPowerLedColor(adjusted.Red, adjusted.Green, adjusted.Blue, out var error);
