@@ -8,6 +8,7 @@ namespace LightControls.Tests;
 public sealed class OpenRgbDownloadIntegrationTests
 {
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task CodebergReleases_DeserializeAndSelectWindowsPortableAsset()
     {
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };

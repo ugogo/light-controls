@@ -7,6 +7,7 @@ namespace LightControls.Tests;
 public sealed class OpenRgbDownloadEndToEndTests
 {
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task DownloadOpenRgbAsync_ExtractsOpenRgbExe()
     {
         var root = Path.Combine(Path.GetTempPath(), "light-controls-openrgb-" + Guid.NewGuid().ToString("N"));
