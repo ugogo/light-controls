@@ -28,12 +28,10 @@ public sealed class OpenRgbBackend(LightControlsSettings settings) : IRgbBackend
     }
 
     public async Task<ApplyColorResult> ApplyColorAsync(
-        IReadOnlyCollection<string> deviceIds,
-        RgbColor color,
-        int brightnessPercent = 100,
+        IReadOnlyCollection<DeviceColorApply> applies,
         CancellationToken cancellationToken = default)
     {
-        if (deviceIds.Count == 0)
+        if (applies.Count == 0)
         {
             return ApplyColorResult.Empty;
         }
@@ -42,11 +40,12 @@ public sealed class OpenRgbBackend(LightControlsSettings settings) : IRgbBackend
         await client.ConnectAsync(settings.Host, settings.Port, cancellationToken);
 
         var devices = await client.GetDevicesAsync(cancellationToken);
-        var selected = devices.Where(device => deviceIds.Contains(device.Id)).ToList();
+        var applyById = applies.ToDictionary(apply => apply.DeviceId, StringComparer.Ordinal);
         var results = new List<DeviceApplyResult>();
 
-        foreach (var device in selected)
+        foreach (var device in devices.Where(candidate => applyById.ContainsKey(candidate.Id)))
         {
+            var apply = applyById[device.Id];
             if (!device.IsSupported)
             {
                 results.Add(new DeviceApplyResult(device.Id, device.Name, false, device.Status));
@@ -55,7 +54,7 @@ public sealed class OpenRgbBackend(LightControlsSettings settings) : IRgbBackend
 
             try
             {
-                await client.ApplyColorAsync(device, color, brightnessPercent, cancellationToken);
+                await client.ApplyColorAsync(device, apply.Color, apply.BrightnessPercent, cancellationToken);
                 results.Add(new DeviceApplyResult(device.Id, device.Name, true, "Applied"));
             }
             catch (Exception ex)

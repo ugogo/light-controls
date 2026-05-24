@@ -33,15 +33,13 @@ public sealed class CompositeRgbBackend(params IRgbBackend[] backends) : IRgbBac
     }
 
     public async Task<ApplyColorResult> ApplyColorAsync(
-        IReadOnlyCollection<string> deviceIds,
-        RgbColor color,
-        int brightnessPercent = 100,
+        IReadOnlyCollection<DeviceColorApply> applies,
         CancellationToken cancellationToken = default)
     {
         var results = new List<DeviceApplyResult>();
         foreach (var backend in _backends)
         {
-            var batch = await backend.ApplyColorAsync(deviceIds, color, brightnessPercent, cancellationToken);
+            var batch = await backend.ApplyColorAsync(applies, cancellationToken);
             results.AddRange(batch.Devices);
         }
 

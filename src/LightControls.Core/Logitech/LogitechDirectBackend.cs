@@ -49,12 +49,12 @@ public sealed class LogitechDirectBackend(LightControlsSettings settings) : IRgb
     }
 
     public Task<ApplyColorResult> ApplyColorAsync(
-        IReadOnlyCollection<string> deviceIds,
-        RgbColor color,
-        int brightnessPercent = 100,
+        IReadOnlyCollection<DeviceColorApply> applies,
         CancellationToken cancellationToken = default)
     {
-        if (!settings.EnableLogitechDirect || !deviceIds.Contains(LogitechDeviceIds.ProX2Superlight2DeviceId))
+        var apply = applies.FirstOrDefault(candidate =>
+            string.Equals(candidate.DeviceId, LogitechDeviceIds.ProX2Superlight2DeviceId, StringComparison.Ordinal));
+        if (!settings.EnableLogitechDirect || apply is null)
         {
             return Task.FromResult(ApplyColorResult.Empty);
         }
@@ -75,7 +75,7 @@ public sealed class LogitechDirectBackend(LightControlsSettings settings) : IRgb
 
             using (session!)
             {
-                var adjusted = color.WithBrightness(brightnessPercent);
+                var adjusted = apply.Color.WithBrightness(apply.BrightnessPercent);
                 var succeeded = session.TrySetPowerLedColor(adjusted.Red, adjusted.Green, adjusted.Blue, out var error);
                 return new ApplyColorResult(
                 [

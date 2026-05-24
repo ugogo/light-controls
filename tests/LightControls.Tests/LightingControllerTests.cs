@@ -26,9 +26,15 @@ public sealed class LightingControllerTests
         var persisted = await store.LoadAsync();
 
         Assert.True(result.Succeeded);
-        Assert.Equal(["keyboard", "mouse"], backend.LastDeviceIds);
-        Assert.Equal(color, backend.LastColor);
-        Assert.Equal(75, backend.LastBrightnessPercent);
+        Assert.Equal(2, backend.LastApplies.Count);
+        Assert.All(backend.LastApplies, apply =>
+        {
+            Assert.Equal(color, apply.Color);
+            Assert.Equal(75, apply.BrightnessPercent);
+        });
+        Assert.Equal(["keyboard", "mouse"], backend.LastApplies.Select(apply => apply.DeviceId).OrderBy(id => id));
         Assert.Equal("#010203", persisted.LastColor);
+        Assert.Equal("#010203", persisted.DeviceSettings["keyboard"].Color);
+        Assert.Equal("#010203", persisted.DeviceSettings["mouse"].Color);
     }
 }

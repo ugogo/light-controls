@@ -28,7 +28,12 @@ public sealed class SettingsStoreTests
             Host = "localhost",
             Port = 1234,
             LastColor = "#ABCDEF",
-            SelectedDeviceIds = ["device-1"]
+            LastBrightness = 80,
+            SelectedDeviceIds = ["device-1"],
+            DeviceSettings =
+            {
+                ["mouse"] = new DeviceLightingSettings { Color = "#112233", Brightness = 55 }
+            }
         };
 
         await store.SaveAsync(settings);
@@ -37,7 +42,26 @@ public sealed class SettingsStoreTests
         Assert.Equal("localhost", loaded.Host);
         Assert.Equal(1234, loaded.Port);
         Assert.Equal("#ABCDEF", loaded.LastColor);
+        Assert.Equal(80, loaded.LastBrightness);
         Assert.Equal(["device-1"], loaded.SelectedDeviceIds);
+        Assert.Equal("#112233", loaded.DeviceSettings["mouse"].Color);
+        Assert.Equal(55, loaded.DeviceSettings["mouse"].Brightness);
+    }
+
+    [Fact]
+    public void GetOrCreateDeviceSettings_UsesLastColorAndBrightnessForNewDevices()
+    {
+        var settings = new LightControlsSettings
+        {
+            LastColor = "#FF0000",
+            LastBrightness = 42
+        };
+
+        var deviceSettings = settings.GetOrCreateDeviceSettings("new-device");
+
+        Assert.Equal("#FF0000", deviceSettings.Color);
+        Assert.Equal(42, deviceSettings.Brightness);
+        Assert.Same(deviceSettings, settings.DeviceSettings["new-device"]);
     }
 
     [Fact]

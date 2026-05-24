@@ -81,7 +81,7 @@
                                 Content="Apply again"
                                 Style="{StaticResource GhostButton}"
                                 Click="ApplyButton_Click"
-                                ToolTip="Re-apply the current color to all devices" />
+                                ToolTip="Re-apply each device's saved color and brightness" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -205,44 +205,62 @@
                             <ScrollViewer x:Name="DevicesListPanel"
                                           VerticalScrollBarVisibility="Auto"
                                           HorizontalScrollBarVisibility="Disabled">
-                                <ItemsControl ItemsSource="{Binding Devices}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <Border Style="{StaticResource DeviceRow}">
-                                                <Grid>
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="Auto" />
-                                                        <ColumnDefinition Width="*" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <Ellipse Width="8" Height="8"
-                                                             VerticalAlignment="Top"
-                                                             Margin="0,5,10,0">
-                                                        <Ellipse.Style>
-                                                            <Style TargetType="Ellipse">
-                                                                <Setter Property="Fill" Value="#3DD68C" />
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding IsSupported}" Value="False">
-                                                                        <Setter Property="Fill" Value="#5C6378" />
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </Ellipse.Style>
-                                                    </Ellipse>
-                                                    <StackPanel Grid.Column="1">
-                                                        <TextBlock Text="{Binding Name}"
-                                                                   FontWeight="SemiBold"
-                                                                   FontSize="14" />
-                                                        <TextBlock Text="{Binding Details}"
-                                                                   Foreground="{StaticResource TextSecondaryBrush}"
-                                                                   FontSize="12"
-                                                                   Margin="0,3,0,0"
-                                                                   TextWrapping="Wrap" />
-                                                    </StackPanel>
-                                                </Grid>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                <ListBox x:Name="DevicesListBox"
+                                         ItemsSource="{Binding Devices}"
+                                         SelectionChanged="DevicesListBox_SelectionChanged"
+                                         BorderThickness="0"
+                                         Background="Transparent">
+                                    <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Ellipse Width="8" Height="8"
+                                                     VerticalAlignment="Top"
+                                                     Margin="0,5,10,0">
+                                                <Ellipse.Style>
+                                                    <Style TargetType="Ellipse">
+                                                        <Setter Property="Fill" Value="#3DD68C" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsSupported}" Value="False">
+                                                                <Setter Property="Fill" Value="#5C6378" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Ellipse.Style>
+                                            </Ellipse>
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="{Binding Name}"
+                                                           FontWeight="SemiBold"
+                                                           FontSize="14" />
+                                                <TextBlock Text="{Binding Details}"
+                                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                                           FontSize="12"
+                                                           Margin="0,3,0,0"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                            <Border Grid.Column="2"
+                                                    Width="22" Height="22"
+                                                    CornerRadius="11"
+                                                    BorderBrush="#FFFFFF22"
+                                                    BorderThickness="1.5"
+                                                    Margin="10,0,8,0"
+                                                    VerticalAlignment="Center"
+                                                    Background="{Binding PreviewBrush}" />
+                                            <TextBlock Grid.Column="3"
+                                                       Text="{Binding BrightnessLabel}"
+                                                       Style="{StaticResource MonoText}"
+                                                       FontSize="12"
+                                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                                       VerticalAlignment="Center" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                                </ListBox>
                             </ScrollViewer>
                         </DockPanel>
 
@@ -252,10 +270,15 @@
                         <StackPanel Grid.Column="2" Margin="20,0,0,0">
                             <TextBlock Text="Color"
                                        Style="{StaticResource DisplayText}"
-                                       FontSize="18"
-                                       Margin="0,0,0,20" />
+                                       FontSize="18" />
+                            <TextBlock x:Name="SelectedDeviceText"
+                                       Text="Select a device"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       FontSize="13"
+                                       Margin="0,6,0,20" />
 
-                            <Button Style="{StaticResource ColorPreviewButton}"
+                            <Button x:Name="ColorPreviewButton"
+                                    Style="{StaticResource ColorPreviewButton}"
                                     Click="ColorPreviewButton_Click"
                                     ToolTip="Choose custom color"
                                     HorizontalAlignment="Center"

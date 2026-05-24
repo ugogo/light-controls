@@ -29,4 +29,22 @@ public sealed class LightControlsSettings
 
     /// <summary>Recently picked custom colors, most recent first.</summary>
     public List<string> RecentCustomColors { get; set; } = [];
+
+    /// <summary>Per-device color and brightness, keyed by device id.</summary>
+    public Dictionary<string, DeviceLightingSettings> DeviceSettings { get; set; } = new(StringComparer.Ordinal);
+
+    public DeviceLightingSettings GetOrCreateDeviceSettings(string deviceId)
+    {
+        if (!DeviceSettings.TryGetValue(deviceId, out var settings))
+        {
+            settings = new DeviceLightingSettings
+            {
+                Color = LastColor,
+                Brightness = LastBrightness
+            };
+            DeviceSettings[deviceId] = settings;
+        }
+
+        return settings;
+    }
 }

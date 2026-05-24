@@ -9,8 +9,6 @@ public interface IRgbBackend
     Task<IReadOnlyList<RgbDevice>> GetDevicesAsync(CancellationToken cancellationToken = default);
 
     Task<ApplyColorResult> ApplyColorAsync(
-        IReadOnlyCollection<string> deviceIds,
-        RgbColor color,
-        int brightnessPercent = 100,
+        IReadOnlyCollection<DeviceColorApply> applies,
         CancellationToken cancellationToken = default);
 }

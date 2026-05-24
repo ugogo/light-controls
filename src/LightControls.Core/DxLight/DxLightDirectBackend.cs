@@ -2,7 +2,6 @@ using DXLight.Core;
 using LightControls.Core.Abstractions;
 using LightControls.Core.Models;
 using LightControls.Core.Settings;
-using LightRgbColor = LightControls.Core.Models.RgbColor;
 
 namespace LightControls.Core.DxLight;
 
@@ -55,12 +54,12 @@ public sealed class DxLightDirectBackend(LightControlsSettings settings) : IRgbB
     }
 
     public Task<ApplyColorResult> ApplyColorAsync(
-        IReadOnlyCollection<string> deviceIds,
-        LightRgbColor color,
-        int brightnessPercent = 100,
+        IReadOnlyCollection<DeviceColorApply> applies,
         CancellationToken cancellationToken = default)
     {
-        if (!settings.EnableDxLightDirect || !deviceIds.Contains(DxLightDeviceIds.DeviceId))
+        var apply = applies.FirstOrDefault(candidate =>
+            string.Equals(candidate.DeviceId, DxLightDeviceIds.DeviceId, StringComparison.Ordinal));
+        if (!settings.EnableDxLightDirect || apply is null)
         {
             return Task.FromResult(ApplyColorResult.Empty);
         }
@@ -81,8 +80,8 @@ public sealed class DxLightDirectBackend(LightControlsSettings settings) : IRgbB
                     deviceName = discovered.DisplayName;
                 }
 
-                var dxColor = new DXLight.Core.RgbColor(color.Red, color.Green, color.Blue);
-                var brightness = Math.Clamp(brightnessPercent, 1, 100) / 100.0;
+                var dxColor = new DXLight.Core.RgbColor(apply.Color.Red, apply.Color.Green, apply.Color.Blue);
+                var brightness = Math.Clamp(apply.BrightnessPercent, 1, 100) / 100.0;
 
                 DeviceSession.WithTransport((transport, info) =>
                 {
