@@ -25,11 +25,14 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _brightnessApplyTimer;
     private LightControlsSettings _settings = new();
     private IRgbBackend? _backend;
+    private LogitechDirectBackend? _logitechBackend;
     private OpenRgbSetupManager? _setupManager;
     private DeviceItem? _selectedDevice;
     private bool _busy;
     private bool _suppressDevicePanelSync;
     private bool _suppressStartupSync;
+    private bool _isExiting;
+    private Forms.NotifyIcon? _notifyIcon;
 
     public ObservableCollection<DeviceItem> Devices { get; } = [];
 
@@ -49,7 +52,80 @@ public partial class MainWindow : Window
         _brightnessApplyTimer.Tick += BrightnessApplyTimer_Tick;
 
         DataContext = this;
+        InitializeTrayIcon();
         ShowSetup("Checking lighting support...");
+    }
+
+    private void InitializeTrayIcon()
+    {
+        var menu = new Forms.ContextMenuStrip();
+        menu.Items.Add("Show Light Controls", null, (_, _) => ShowFromTray());
+        menu.Items.Add(new Forms.ToolStripSeparator());
+        menu.Items.Add("Exit", null, (_, _) => ExitApplication());
+
+        _notifyIcon = new Forms.NotifyIcon
+        {
+            Icon = TrayIconFactory.Create(),
+            Text = "Light Controls",
+            Visible = true,
+            ContextMenuStrip = menu
+        };
+        _notifyIcon.DoubleClick += (_, _) => ShowFromTray();
+    }
+
+    private void Window_Closing(object? sender, CancelEventArgs e)
+    {
+        if (_isExiting)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        HideToTray();
+    }
+
+    private void Window_StateChanged(object? sender, EventArgs e)
+    {
+        if (_isExiting || WindowState != WindowState.Minimized)
+        {
+            return;
+        }
+
+        HideToTray();
+    }
+
+    private void HideToTray()
+    {
+        Hide();
+        ShowInTaskbar = false;
+        WindowState = WindowState.Normal;
+    }
+
+    private void ShowFromTray()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        ShowInTaskbar = true;
+        Activate();
+    }
+
+    private void ExitApplication()
+    {
+        _isExiting = true;
+        _brightnessApplyTimer.Stop();
+
+        if (_notifyIcon is not null)
+        {
+            _notifyIcon.Visible = false;
+            _notifyIcon.Dispose();
+            _notifyIcon = null;
+        }
+
+        _logitechBackend?.Dispose();
+        _logitechBackend = null;
+
+        Close();
+        System.Windows.Application.Current.Shutdown();
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
@@ -57,9 +133,10 @@ public partial class MainWindow : Window
         _suppressDevicePanelSync = true;
         _settings = await _settingsStore.LoadAsync();
         var openRgbBackend = new OpenRgbBackend(_settings);
+        _logitechBackend = new LogitechDirectBackend(_settings);
         _backend = new CompositeRgbBackend(
             openRgbBackend,
-            new LogitechDirectBackend(_settings),
+            _logitechBackend,
             new DxLightDirectBackend(_settings));
         _setupManager = new OpenRgbSetupManager(_settings, openRgbBackend);
 
