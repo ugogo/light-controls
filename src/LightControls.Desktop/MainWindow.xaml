@@ -77,6 +77,15 @@
                     </StackPanel>
 
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <CheckBox x:Name="RunAtStartupCheckBox"
+                                  Content="Start with Windows"
+                                  Foreground="{StaticResource TextSecondaryBrush}"
+                                  FontSize="13"
+                                  VerticalAlignment="Center"
+                                  Margin="0,0,16,0"
+                                  Checked="RunAtStartupCheckBox_Changed"
+                                  Unchecked="RunAtStartupCheckBox_Changed"
+                                  ToolTip="Launch Light Controls when you sign in to Windows" />
                         <Button x:Name="ApplyButton"
                                 Content="Apply again"
                                 Style="{StaticResource GhostButton}"

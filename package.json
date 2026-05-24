@@ -12,6 +12,8 @@
     "verify": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/verify.ps1",
     "windows:build": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build.ps1",
     "windows:start": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/windows-start.ps1",
-    "windows:shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/create-shortcut.ps1 -BuildIfMissing"
+    "windows:shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/create-shortcut.ps1 -BuildIfMissing",
+    "windows:startup": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/register-startup.ps1 -Action Enable",
+    "windows:startup:disable": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/register-startup.ps1 -Action Disable"
   }
 }

@@ -30,6 +30,9 @@ public sealed class LightControlsSettings
     /// <summary>Recently picked custom colors, most recent first.</summary>
     public List<string> RecentCustomColors { get; set; } = [];
 
+    /// <summary>When true, register Light Controls to launch when Windows starts.</summary>
+    public bool RunAtStartup { get; set; }
+
     /// <summary>Per-device color and brightness, keyed by device id.</summary>
     public Dictionary<string, DeviceLightingSettings> DeviceSettings { get; set; } = new(StringComparer.Ordinal);
 

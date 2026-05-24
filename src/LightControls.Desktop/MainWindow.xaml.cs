@@ -14,6 +14,7 @@ using LightControls.Core.Models;
 using LightControls.Core.OpenRgb;
 using LightControls.Core.Settings;
 using LightControls.Core.Setup;
+using LightControls.Desktop.Startup;
 using Forms = System.Windows.Forms;
 
 namespace LightControls.Desktop;
@@ -28,6 +29,7 @@ public partial class MainWindow : Window
     private DeviceItem? _selectedDevice;
     private bool _busy;
     private bool _suppressDevicePanelSync;
+    private bool _suppressStartupSync;
 
     public ObservableCollection<DeviceItem> Devices { get; } = [];
 
@@ -63,6 +65,7 @@ public partial class MainWindow : Window
 
         LoadRecentCustomSwatches();
         UpdateRecentCustomEmptyState();
+        await SyncStartupFromSettingsAsync();
         await InitializeLightingAsync();
         _suppressDevicePanelSync = false;
     }
@@ -219,6 +222,89 @@ public partial class MainWindow : Window
     private async void ApplyButton_Click(object sender, RoutedEventArgs e)
     {
         await ApplyAllDevicesAsync();
+    }
+
+    private async Task SyncStartupFromSettingsAsync()
+    {
+        _suppressStartupSync = true;
+        try
+        {
+            var exePath = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(exePath))
+            {
+                RunAtStartupCheckBox.IsEnabled = false;
+                return;
+            }
+
+            var registeredForThisExe = WindowsStartupManager.IsRegisteredFor(exePath);
+            if (_settings.RunAtStartup || registeredForThisExe)
+            {
+                if (!registeredForThisExe)
+                {
+                    WindowsStartupManager.Enable(exePath);
+                }
+
+                if (!_settings.RunAtStartup)
+                {
+                    _settings.RunAtStartup = true;
+                    await _settingsStore.SaveAsync(_settings);
+                }
+
+                RunAtStartupCheckBox.IsChecked = true;
+                return;
+            }
+
+            if (WindowsStartupManager.IsEnabled)
+            {
+                WindowsStartupManager.Disable();
+            }
+
+            RunAtStartupCheckBox.IsChecked = false;
+        }
+        finally
+        {
+            _suppressStartupSync = false;
+        }
+    }
+
+    private async void RunAtStartupCheckBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppressStartupSync)
+        {
+            return;
+        }
+
+        var enabled = RunAtStartupCheckBox.IsChecked == true;
+        var exePath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(exePath))
+        {
+            _suppressStartupSync = true;
+            RunAtStartupCheckBox.IsChecked = false;
+            _suppressStartupSync = false;
+            return;
+        }
+
+        try
+        {
+            if (enabled)
+            {
+                WindowsStartupManager.Enable(exePath);
+            }
+            else
+            {
+                WindowsStartupManager.Disable();
+            }
+
+            _settings.RunAtStartup = enabled;
+            await _settingsStore.SaveAsync(_settings);
+        }
+        catch (Exception ex)
+        {
+            _suppressStartupSync = true;
+            RunAtStartupCheckBox.IsChecked = !enabled;
+            _suppressStartupSync = false;
+            ShowSetup($"Could not update Windows startup: {ex.Message}");
+        }
     }
 
     private async Task ApplyAllDevicesAsync()
