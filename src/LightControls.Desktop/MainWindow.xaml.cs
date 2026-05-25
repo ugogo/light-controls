@@ -109,6 +109,8 @@ public partial class MainWindow : Window
         Activate();
     }
 
+    public void ActivateFromSecondInstance() => ShowFromTray();
+
     private void ExitApplication()
     {
         _isExiting = true;

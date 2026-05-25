@@ -43,6 +43,6 @@ internal static class Hidpp20Constants
     /// <summary>Effect mode for a fixed/solid RGB color on 8071 devices.</summary>
     public const ushort RgbEffectModeOn = 0x0001;
 
-    /// <summary>Disable onboard profiles so software can control lighting.</summary>
+    /// <summary>Onboard profile mode value (diagnostics only; not modified by lighting apply).</summary>
     public const byte OnboardProfilesDisable = 0x02;
 }

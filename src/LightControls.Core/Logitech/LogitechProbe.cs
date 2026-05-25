@@ -14,16 +14,9 @@ public static class LogitechProbe
             var lines = new List<string> { "Mouse HID session opened." };
             lines.Add($"8090: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureModeStatus, out var modeStatus)} -> {modeStatus}");
             lines.Add($"8070: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureColorLedEffects, out var colorLed)} -> {colorLed}");
-            lines.Add($"1300: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureLedSoftwareControl, out var swLed)} -> {swLed}");
-
-            lines.Add($"8100: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureOnboardProfiles, out var onboard)} -> {onboard}");
             lines.Add($"8071: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureRgbEffects, out var rgbEffects)} -> {rgbEffects}");
-            lines.Add($"8040: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureBrightnessControl, out var brightness)} -> {brightness}");
-
-            if (session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureRgbEffects, out var rgbFeatureIndex))
-            {
-                lines.Add("Power save (before): " + (session.TryReadRgbPowerSave(rgbFeatureIndex) ?? "unavailable"));
-            }
+            lines.Add($"8100: {session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureOnboardProfiles, out var onboard)} -> {onboard}");
+            lines.Add($"G HUB friendly: {session.IsGhubFriendlyLighting}");
 
             foreach (var (label, red, green, blue) in new[]
                      {
@@ -36,11 +29,7 @@ public static class LogitechProbe
                 lines.Add($"SET {label}: {ok}" + (setError is null ? string.Empty : $" ({setError})"));
             }
 
-            if (session.TryGetFeatureIndex(Hidpp20.Hidpp20Constants.FeatureRgbEffects, out rgbFeatureIndex))
-            {
-                lines.Add("Power save (after): " + (session.TryReadRgbPowerSave(rgbFeatureIndex) ?? "unavailable"));
-            }
-
+            lines.Add($"Active path: {session.ActiveColorPathName}");
             return string.Join(Environment.NewLine, lines);
         }
     }

@@ -16,6 +16,16 @@ internal sealed class Hidpp20Session : IDisposable
     private readonly Dictionary<ushort, byte> _featureIndexCache = [];
     private readonly Dictionary<byte, byte> _solidEffectIndexCache = [];
     private bool _rgbSetupComplete;
+    private PowerLedColorPath _activeColorPath;
+    private byte _activeFeatureIndex;
+
+    private enum PowerLedColorPath
+    {
+        None,
+        ModeStatus,
+        RgbEffects,
+        ColorLedEffects,
+    }
 
     private Hidpp20Session(HidDevice shortDevice, HidDevice longDevice, byte deviceIndex)
     {
@@ -26,7 +36,15 @@ internal sealed class Hidpp20Session : IDisposable
         _shortStream.ReadTimeout = 500;
         _longStream.ReadTimeout = 1000;
         _deviceIndex = deviceIndex;
+        IsGhubFriendlyLighting = ResolveGhubFriendlyLighting();
     }
+
+    /// <summary>
+    /// Sends color-only HID++ writes without claiming RGB software control from G HUB.
+    /// </summary>
+    public bool IsGhubFriendlyLighting { get; }
+
+    public string ActiveColorPathName => _activeColorPath.ToString();
 
     public static bool IsDevicePresent()
     {
@@ -83,8 +101,8 @@ internal sealed class Hidpp20Session : IDisposable
 
     public bool ProbeProX2Mouse()
     {
-        return TryGetFeatureIndex(Hidpp20Constants.FeatureRgbEffects, out _)
-            || TryGetFeatureIndex(Hidpp20Constants.FeatureModeStatus, out _)
+        return TryGetFeatureIndex(Hidpp20Constants.FeatureModeStatus, out _)
+            || TryGetFeatureIndex(Hidpp20Constants.FeatureRgbEffects, out _)
             || TryGetFeatureIndex(Hidpp20Constants.FeatureColorLedEffects, out _)
             || TryGetFeatureIndex(Hidpp20Constants.FeatureLedSoftwareControl, out _);
     }
@@ -119,14 +137,23 @@ internal sealed class Hidpp20Session : IDisposable
         return false;
     }
 
+    public void ResetActiveColorPath()
+    {
+        _activeColorPath = PowerLedColorPath.None;
+        _activeFeatureIndex = 0;
+    }
+
     public bool TrySetPowerLedColor(byte red, byte green, byte blue, out string? error)
     {
+        if (IsGhubFriendlyLighting)
+        {
+            return TrySetGhubFriendlyColor(red, green, blue, out error);
+        }
+
         if (TrySetViaRgbEffects(red, green, blue, out error))
         {
             return true;
         }
-
-        TryEnsureSoftwareControl();
 
         if (TrySetViaModeStatus(red, green, blue, out error))
         {
@@ -138,33 +165,91 @@ internal sealed class Hidpp20Session : IDisposable
             return true;
         }
 
-        if (TrySetViaLedSoftwareControl(red, green, blue, out error))
+        error ??= "No supported HID++ lighting feature responded on this mouse.";
+        return false;
+    }
+
+    public bool TrySetRgbEffectsColorDirect(byte red, byte green, byte blue, out string? error)
+    {
+        if (!TryGetFeatureIndex(Hidpp20Constants.FeatureRgbEffects, out var featureIndex))
+        {
+            error = "RGB_EFFECTS (0x8071) is not available.";
+            return false;
+        }
+
+        if (!TrySetRgbEffectsColor(featureIndex, red, green, blue, out error))
+        {
+            return false;
+        }
+
+        ActivateColorPath(PowerLedColorPath.RgbEffects, featureIndex);
+        return true;
+    }
+
+    public bool TrySetColorLedEffectsDirect(byte red, byte green, byte blue, out string? error) =>
+        TrySetViaColorLedEffects(red, green, blue, out error);
+
+    private bool TrySetGhubFriendlyColor(byte red, byte green, byte blue, out string? error)
+    {
+        if (TrySetRgbEffectsColorDirect(red, green, blue, out error))
         {
             return true;
         }
 
-        error ??= "No supported HID++ lighting feature responded on this mouse.";
+        if (TrySetViaColorLedEffects(red, green, blue, out error))
+        {
+            return true;
+        }
+
+        if (TrySetViaModeStatus(red, green, blue, out error))
+        {
+            return true;
+        }
+
+        error ??= "No G HUB-compatible color command succeeded on this mouse.";
         return false;
     }
 
     public bool TryMaintainPowerLedColor(byte red, byte green, byte blue)
     {
+        if (IsGhubFriendlyLighting)
+        {
+            return _activeColorPath switch
+            {
+                PowerLedColorPath.RgbEffects => TrySetRgbEffectsColorDirect(red, green, blue, out _),
+                PowerLedColorPath.ColorLedEffects => TrySetViaColorLedEffects(red, green, blue, out _),
+                PowerLedColorPath.ModeStatus => TrySetViaModeStatus(red, green, blue, out _),
+                _ => TrySetGhubFriendlyColor(red, green, blue, out _),
+            };
+        }
+
         DrainPendingNotifications();
-        if (!TryGetFeatureIndex(Hidpp20Constants.FeatureRgbEffects, out var featureIndex))
-        {
-            return TrySetPowerLedColor(red, green, blue, out _);
-        }
 
-        if (TrySetRgbEffectsColor(featureIndex, red, green, blue, out _))
+        switch (_activeColorPath)
         {
-            return true;
-        }
+            case PowerLedColorPath.RgbEffects:
+                if (TrySetRgbEffectsColor(_activeFeatureIndex, red, green, blue, out _))
+                {
+                    return true;
+                }
 
-        return TryReclaimRgbControl(featureIndex, red, green, blue, out _);
+                return TryReclaimRgbControl(_activeFeatureIndex, red, green, blue, out _);
+            case PowerLedColorPath.ModeStatus:
+                return TrySetViaModeStatus(red, green, blue, out _);
+            case PowerLedColorPath.ColorLedEffects:
+                return TrySetViaColorLedEffects(red, green, blue, out _);
+            default:
+                return TrySetPowerLedColor(red, green, blue, out _);
+        }
     }
 
     public int DrainPendingNotifications(int maxReads = 8)
     {
+        if (IsGhubFriendlyLighting)
+        {
+            return 0;
+        }
+
         var drained = 0;
         for (var i = 0; i < maxReads; i++)
         {
@@ -181,12 +266,12 @@ internal sealed class Hidpp20Session : IDisposable
 
     public bool TryHandleRgbNotifications(byte red, byte green, byte blue, int maxReads = 12)
     {
-        if (!TryGetFeatureIndex(Hidpp20Constants.FeatureRgbEffects, out var featureIndex))
+        if (IsGhubFriendlyLighting || _activeColorPath != PowerLedColorPath.RgbEffects)
         {
             return false;
         }
 
-        var handled = false;
+        var rgbLost = false;
         for (var i = 0; i < maxReads; i++)
         {
             if (!TryWaitForNotification(250, out var report))
@@ -194,20 +279,15 @@ internal sealed class Hidpp20Session : IDisposable
                 break;
             }
 
-            if (!IsRgbEffectsNotification(report, featureIndex) && !IsAsyncNotification(report))
+            if (!IsRgbEffectsNotification(report, _activeFeatureIndex))
             {
                 continue;
             }
 
-            handled = true;
+            rgbLost = true;
         }
 
-        if (handled)
-        {
-            return TryReclaimRgbControl(featureIndex, red, green, blue, out _);
-        }
-
-        return false;
+        return rgbLost;
     }
 
     public string? TryReadRgbPowerSave(byte featureIndex)
@@ -226,6 +306,11 @@ internal sealed class Hidpp20Session : IDisposable
 
     public void TryReleaseRgbSoftwareControl()
     {
+        if (IsGhubFriendlyLighting)
+        {
+            return;
+        }
+
         if (!TryGetFeatureIndex(Hidpp20Constants.FeatureRgbEffects, out var featureIndex))
         {
             return;
@@ -275,6 +360,32 @@ internal sealed class Hidpp20Session : IDisposable
         return false;
     }
 
+    private bool ResolveGhubFriendlyLighting()
+    {
+        if (!TryGetFeatureIndex(Hidpp20Constants.FeatureModeStatus, out _))
+        {
+            return false;
+        }
+
+        foreach (var mouseId in LogitechDeviceIds.DirectMouseProductIds)
+        {
+            if (_shortDevice.ProductID == mouseId || _longDevice.ProductID == mouseId)
+            {
+                return true;
+            }
+        }
+
+        foreach (var receiverId in LogitechDeviceIds.LightspeedReceiverProductIds)
+        {
+            if (_shortDevice.ProductID == receiverId || _longDevice.ProductID == receiverId)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private bool TrySetViaRgbEffects(byte red, byte green, byte blue, out string? error)
     {
         error = null;
@@ -287,13 +398,22 @@ internal sealed class Hidpp20Session : IDisposable
         return TryReclaimRgbControl(featureIndex, red, green, blue, out error);
     }
 
+    private void ActivateColorPath(PowerLedColorPath path, byte featureIndex = 0)
+    {
+        _activeColorPath = path;
+        if (featureIndex != 0)
+        {
+            _activeFeatureIndex = featureIndex;
+        }
+    }
+
     private bool TryReclaimRgbControl(byte featureIndex, byte red, byte green, byte blue, out string? error)
     {
         error = null;
         EnsureRgbSetup(featureIndex);
-        TryEnableRgbSoftwareControl(featureIndex);
         if (TrySetRgbEffectsColor(featureIndex, red, green, blue, out error))
         {
+            ActivateColorPath(PowerLedColorPath.RgbEffects, featureIndex);
             return true;
         }
 
@@ -308,25 +428,9 @@ internal sealed class Hidpp20Session : IDisposable
             return;
         }
 
-        TryEnsureSoftwareControl();
         TryEnableRgbSoftwareControl(featureIndex);
         TryDisableRgbPowerSave(featureIndex);
-        TrySetMaxBrightness();
         _rgbSetupComplete = true;
-    }
-
-    private void TrySetMaxBrightness()
-    {
-        if (!TryGetFeatureIndex(Hidpp20Constants.FeatureBrightnessControl, out var featureIndex))
-        {
-            return;
-        }
-
-        var report = CreateLongReport(Hidpp20Constants.CmdBrightnessControlSetBrightness);
-        report[2] = featureIndex;
-        report[4] = 0x01;
-        report[5] = 100;
-        TryRequest(report, out _);
     }
 
     private bool TrySetRgbEffectsColor(byte featureIndex, byte red, byte green, byte blue, out string? error)
@@ -424,19 +528,6 @@ internal sealed class Hidpp20Session : IDisposable
         return effectCount > 0 ? (byte)0 : null;
     }
 
-    private void TryEnsureSoftwareControl()
-    {
-        if (!TryGetFeatureIndex(Hidpp20Constants.FeatureOnboardProfiles, out var featureIndex))
-        {
-            return;
-        }
-
-        var report = CreateLongReport(Hidpp20Constants.CmdOnboardProfilesSetMode);
-        report[2] = featureIndex;
-        report[5] = Hidpp20Constants.OnboardProfilesDisable;
-        TryRequest(report, out _);
-    }
-
     private bool TrySetViaModeStatus(byte red, byte green, byte blue, out string? error)
     {
         error = null;
@@ -446,39 +537,26 @@ internal sealed class Hidpp20Session : IDisposable
             return false;
         }
 
-        var report = CreateLongReport(Hidpp20Constants.CmdModeStatusSetSolidColor);
-        report[2] = featureIndex;
-        report[5] = 0x01;
-        report[6] = red;
-        report[7] = green;
-        report[8] = blue;
-
-        if (TryRequest(report, out _))
-        {
-            return true;
-        }
-
-        ReadOnlySpan<byte[]> parameterSets =
+        ReadOnlySpan<(byte Zone, byte Param)> zones =
         [
-            [0x00, 0x01, red, green, blue],
-            [0x00, 0x00, red, green, blue]
+            (0x01, 0x00),
+            (0x00, 0x00),
         ];
 
-        foreach (var command in new[] { Hidpp20Constants.CmdModeStatusSetSolidColor, (byte)0x50, (byte)0x70 })
+        foreach (var (zone, param) in zones)
         {
-            foreach (var parameters in parameterSets)
-            {
-                report = CreateLongReport(command);
-                report[2] = featureIndex;
-                for (var i = 0; i < parameters.Length && 5 + i < report.Length; i++)
-                {
-                    report[5 + i] = parameters[i];
-                }
+            var report = CreateLongReport(Hidpp20Constants.CmdModeStatusSetSolidColor);
+            report[2] = featureIndex;
+            report[4] = param;
+            report[5] = zone;
+            report[6] = red;
+            report[7] = green;
+            report[8] = blue;
 
-                if (TryRequest(report, out _))
-                {
-                    return true;
-                }
+            if (TryRequest(report, out _))
+            {
+                ActivateColorPath(PowerLedColorPath.ModeStatus, featureIndex);
+                return true;
             }
         }
 
@@ -507,39 +585,11 @@ internal sealed class Hidpp20Session : IDisposable
 
         if (TryRequest(report, out _))
         {
+            ActivateColorPath(PowerLedColorPath.ColorLedEffects, featureIndex);
             return true;
         }
 
         error = "COLOR_LED_EFFECTS command was rejected by the mouse.";
-        return false;
-    }
-
-    private bool TrySetViaLedSoftwareControl(byte red, byte green, byte blue, out string? error)
-    {
-        error = null;
-        if (!TryGetFeatureIndex(Hidpp20Constants.FeatureLedSoftwareControl, out var featureIndex))
-        {
-            error = "LED software control (0x1300) is not available.";
-            return false;
-        }
-
-        var enable = CreateShortReport(0x30);
-        enable[2] = featureIndex;
-        enable[4] = 0x01;
-        TryRequest(enable, out _);
-
-        var report = CreateShortReport(Hidpp20Constants.CmdLedSwControlSetLedState);
-        report[2] = featureIndex;
-        report[4] = 0x00;
-        report[5] = 0x00;
-        report[6] = 0x01;
-
-        if (TryRequest(report, out _))
-        {
-            return true;
-        }
-
-        error = "LED software control command was rejected by the mouse.";
         return false;
     }
 
@@ -632,7 +682,7 @@ internal sealed class Hidpp20Session : IDisposable
 
         if (report[0] == Hidpp20Constants.ReportIdShortNotification)
         {
-            return true;
+            return featureIndex is null;
         }
 
         if (report[0] != Hidpp20Constants.ReportIdLong)
