@@ -34,18 +34,12 @@ For a self-contained build that does not require the .NET runtime, use `npm run 
 
 ```powershell
 npm run windows:build
-npm run windows:start          # launch app (builds Release if missing)
+npm start                      # launch app (builds if missing, returns immediately)
 npm run windows:shortcut       # Desktop shortcut → Light Controls.lnk
 npm run windows:startup        # register to launch when Windows starts
 ```
 
 Or double-click **Light Controls** on your Desktop after running `windows:shortcut`.
-
-### Developer run
-
-```powershell
-npm start
-```
 
 ## Build from source
 
@@ -74,13 +68,12 @@ dotnet test tests/LightControls.Tests/LightControls.Tests.csproj --filter "Categ
 | Script | Description |
 |--------|-------------|
 | `npm run build` | `dotnet build` the solution |
-| `npm start` | Run the desktop app from source (requires SDK) |
+| `npm start` | Launch the app (builds if missing; terminal returns immediately) |
 | `npm run test` | Run unit tests |
 | `npm run package` | Publish a self-contained exe to `dist\LightControls\` |
 | `npm run launch` | Launch the app (prefers standalone build, else Release) |
 | `npm run verify` | Run tests and build |
 | `npm run windows:build` | `dotnet build` the solution |
-| `npm run windows:start` | Launch the app (PowerShell; builds Release if missing) |
 | `npm run windows:shortcut` | Create **Light Controls.lnk** on the Desktop |
 | `npm run windows:startup` | Register Light Controls to run when Windows starts |
 | `npm run windows:startup:disable` | Remove the Windows startup registration |
@@ -98,7 +91,7 @@ The standalone app is written to:
 dist\LightControls\LightControls.Desktop.exe
 ```
 
-After packaging, `npm run launch` uses the self-contained exe. `windows:start` and `windows:shortcut` prefer a local Release or Debug build so dev changes are not shadowed by an older `dist` folder.
+After packaging, `npm run launch` uses the self-contained exe. `npm start` and `windows:shortcut` prefer a local Release or Debug build so dev changes are not shadowed by an older `dist` folder.
 
 ## Notes
 
